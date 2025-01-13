@@ -3,6 +3,8 @@ import math
 
 menu_name = "Hot Cold"  # Required for module loading
 
+#The goal of "Hot Cold" is to locate a hidden target location on the map using distance-based feedback such as "warmer," "colder," or "HOT!" The first player to get within 10 feet (~3 meters) of the target wins the game.
+
 def display_menu():
     return "Welcome to Hot Cold!\n" \
            "Set the game duration (in seconds) and find the hidden location!\n" \
