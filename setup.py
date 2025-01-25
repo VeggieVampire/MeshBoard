@@ -38,7 +38,7 @@ def find_meshtastic_device():
 def create_config_file(dev_path):
     """Create the configuration file with the detected device path."""
     logger.info(f"Creating configuration file '{CONFIG_FILE}'...")
-    config_data = {"device": dev_path}
+    config_data = {"device_path": dev_path}  # Updated key to 'device_path'
     try:
         with open(CONFIG_FILE, "w") as f:
             json.dump(config_data, f, indent=4)
