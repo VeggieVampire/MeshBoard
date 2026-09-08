@@ -13,7 +13,7 @@ MeshBoard also keeps the attached radio clock sane. On startup it sets the Mesht
 - Persistent SQLite store-and-forward mail keyed by Meshtastic node ID.
 - AddressBook opt-in with user-chosen 4-character IDs.
 - Who's Been Here list showing automatic recent MeshBoard users, newest first, with command counts.
-- Message Board categories for general discussion, local news, trading, events, rumors, and a short header channel.
+- Message Board categories for general discussion, local news, trading, events, and rumors.
 - Events check-in board with a 24-hour HAM-style roster from AddressBook.
 - Local SysOp admin website for viewing and deleting database content from the LAN or hotspot.
 - Live GPS-aware Location tools using the sender node's latest Meshtastic position.
@@ -231,7 +231,7 @@ chmod +x /home/osmc/MeshBoard/scripts/run_admin_forever.sh
 nohup /home/osmc/MeshBoard/scripts/run_admin_forever.sh >/dev/null 2>&1 &
 ```
 
-Admin pages include Who's Been Here activity, editable AddressBook contacts, Mail messages, Message Board posts, location notes, Events check-ins, and recent logs. Delete/remove/close buttons change `meshboard.db` immediately, so use them like a real SysOp console.
+Admin pages include Users activity, editable AddressBook contacts, Mail messages, Message Board posts, location notes, Events check-ins, and recent logs. Edit/delete/remove/close buttons change `meshboard.db` immediately, so use them like a real SysOp console.
 
 The admin launcher watches for a usable IPv4 address before starting the website. If the Pi has no LAN or hotspot IP, the web server stays down and only the small launcher loop remains. If the IP disappears later, the launcher stops the website until an IP comes back. To change the check interval, set `ADMIN_IP_CHECK_INTERVAL_SECONDS` before running `scripts/run_admin_forever.sh`.
 
@@ -345,7 +345,7 @@ Who's Been Here:
 Message Board:
 
 - Open `Message Board` from the main menu.
-- Categories are General Discussion, Local News, Buy / Sell / Trade, Events, Rumors & Gossip, and Main Menu Header.
+- Categories are General Discussion, Local News, Buy / Sell / Trade, Events, and Rumors & Gossip.
 - In most categories, use `POST` to add a post, a number to read a post, `Next` for another page, and `BACK` to return.
 - In Events, `1` starts or joins the active 24-hour check-in, `2` refreshes the check-in roster, and `3` opens normal Event posts.
 - The Events check-in roster is based on AddressBook users and shows who is `In` and who is still `Out`.

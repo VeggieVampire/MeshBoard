@@ -10,7 +10,6 @@ CATEGORIES = [
     ("trade", "Buy / Sell / Trade"),
     ("events", "Events"),
     ("rumors", "Rumors & Gossip"),
-    ("header", "Main Menu Header"),
 ]
 
 

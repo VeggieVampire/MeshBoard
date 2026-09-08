@@ -45,6 +45,14 @@ class AdminServerTests(unittest.TestCase):
                 with opener.open(f"{base}/messages") as response:
                     messages = response.read().decode("utf-8")
                 self.assertIn("remove me", messages)
+                self.assertIn("Edit", messages)
+
+                edit_data = urlencode(
+                    {"id": str(message_id), "sender_id": "!from", "recipient_id": "!to", "body": "edited body"}
+                ).encode("utf-8")
+                with opener.open(Request(f"{base}/edit-message", data=edit_data, method="POST")):
+                    pass
+                self.assertIn("edited body", Database(db_path).inbox("!to", include_deleted=True)[0]["body"])
 
                 delete_data = urlencode({"id": str(message_id)}).encode("utf-8")
                 with opener.open(Request(f"{base}/delete-message", data=delete_data, method="POST")):
@@ -95,6 +103,16 @@ class AdminServerTests(unittest.TestCase):
                 self.assertIn("!raw", users)
                 self.assertIn("<td>No</td>", users)
                 self.assertIn("<td>2</td>", users)
+
+                edit_data = urlencode(
+                    {"node_id": "!raw", "display_name": "RAW1", "mail_listed": "1", "command_count": "7"}
+                ).encode("utf-8")
+                with opener.open(Request(f"{base}/edit-user", data=edit_data, method="POST")):
+                    pass
+                raw = Database(db_path).get_user("!raw")
+                self.assertEqual("RAW1", raw["display_name"])
+                self.assertEqual(1, raw["mail_listed"])
+                self.assertEqual(7, raw["command_count"])
             finally:
                 server.shutdown()
                 server.server_close()
@@ -131,16 +149,100 @@ class AdminServerTests(unittest.TestCase):
                 self.assertIn("Local News", board)
                 self.assertIn("road is clear", board)
                 self.assertIn("CABN", board)
+                self.assertIn("Edit", board)
                 self.assertNotIn("extra batteries", board)
+                self.assertNotIn("Main Menu Header", board)
 
-                delete_data = urlencode({"id": str(news_id), "category": "news"}).encode("utf-8")
+                edit_data = urlencode(
+                    {"id": str(news_id), "category": "rumors", "author_id": "!author", "body": "edited rumor"}
+                ).encode("utf-8")
+                with opener.open(Request(f"{base}/edit-board", data=edit_data, method="POST")) as response:
+                    redirected = response.geturl()
+                self.assertIn("/board?edited=1&category=rumors", redirected)
+                edited = Database(db_path).get_board_post(news_id)
+                self.assertEqual("rumors", edited["category"])
+                self.assertEqual("edited rumor", edited["body"])
+
+                delete_data = urlencode({"id": str(news_id), "category": "rumors"}).encode("utf-8")
                 with opener.open(Request(f"{base}/delete-board", data=delete_data, method="POST")) as response:
                     redirected = response.geturl()
 
-                self.assertIn("/board?deleted=1&category=news", redirected)
-                with opener.open(f"{base}/board?category=news") as response:
+                self.assertIn("/board?deleted=1&category=rumors", redirected)
+                with opener.open(f"{base}/board?category=rumors") as response:
                     board = response.read().decode("utf-8")
-                self.assertNotIn("road is clear", board)
+                self.assertNotIn("edited rumor", board)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+    def test_location_and_checkin_edit_actions(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "meshboard.db")
+            db = Database(db_path)
+            location_id = db.save_location("!loc", "LOC1", 35.0, -97.0, None, "old note")
+            checkin_id = db.create_checkin_event("!net", "Old Net", starts_at=1000, duration_seconds=86400)
+            config = {
+                "host": "127.0.0.1",
+                "port": 0,
+                "username": "sysop",
+                "password_hash": make_password_hash("secret"),
+                "session_secret": "test-secret",
+                "database": {"path": db_path},
+            }
+            server = ThreadingHTTPServer(("127.0.0.1", 0), AdminHandler)
+            server.config = config
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base = f"http://127.0.0.1:{server.server_address[1]}"
+                opener = build_opener(HTTPCookieProcessor(CookieJar()))
+                login_data = urlencode({"username": "sysop", "password": "secret"}).encode("utf-8")
+                with opener.open(Request(f"{base}/login", data=login_data, method="POST")):
+                    pass
+
+                with opener.open(f"{base}/locations") as response:
+                    locations = response.read().decode("utf-8")
+                self.assertIn("Edit", locations)
+                location_data = urlencode(
+                    {
+                        "id": str(location_id),
+                        "creator_id": "!loc",
+                        "creator_name": "LOC2",
+                        "latitude": "36.5",
+                        "longitude": "-98.5",
+                        "altitude": "123",
+                        "visibility": "public",
+                        "body": "new note",
+                    }
+                ).encode("utf-8")
+                with opener.open(Request(f"{base}/edit-location", data=location_data, method="POST")):
+                    pass
+                edited_location = Database(db_path).active_locations()[0]
+                self.assertEqual("LOC2", edited_location["creator_name"])
+                self.assertEqual("new note", edited_location["body"])
+                self.assertEqual(36.5, edited_location["latitude"])
+
+                with opener.open(f"{base}/checkins") as response:
+                    checkins = response.read().decode("utf-8")
+                self.assertIn("Edit", checkins)
+                checkin_data = urlencode(
+                    {
+                        "id": str(checkin_id),
+                        "title": "New Net",
+                        "created_by": "!net",
+                        "starts_at": "2000",
+                        "ends_at": "3000",
+                        "closed": "1",
+                    }
+                ).encode("utf-8")
+                with opener.open(Request(f"{base}/edit-checkin", data=checkin_data, method="POST")):
+                    pass
+                with Database(db_path).connect() as conn:
+                    edited_checkin = conn.execute("SELECT * FROM checkin_events WHERE id = ?", (checkin_id,)).fetchone()
+                self.assertEqual("New Net", edited_checkin["title"])
+                self.assertEqual(3000, edited_checkin["ends_at"])
+                self.assertEqual(1, edited_checkin["closed"])
             finally:
                 server.shutdown()
                 server.server_close()

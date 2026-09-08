@@ -363,7 +363,8 @@ class MeshBoardTests(unittest.TestCase):
 
         menu = MessageBoard.display_menu()
         self.assertIn("1. General Discussion", menu)
-        self.assertIn("6. Main Menu Header", menu)
+        self.assertIn("5. Rumors & Gossip", menu)
+        self.assertNotIn("Main Menu Header", menu)
 
         category = MessageBoard.process_command(user, "1", self.bbs)
         self.assertIn("General Discussion", category)
@@ -432,7 +433,7 @@ class MeshBoardTests(unittest.TestCase):
             "main": ["weather?", "0", "999", "menu", "main menu"],
             "seen": ["top", "4", "next", "wat", "cd .."],
             "mail": ["top", "3", "wat", "2", "x", "9", "back", "3", "12", "AB C", "HOME"],
-            "board": ["top", "5", "wat", "0", "6", "post", "", "Header text", "back"],
+            "board": ["top", "5", "wat", "0", "5", "post", "", "Rumor text", "back"],
             "events": ["top", "5", "4", "wat", "1", "2", "3", "post", "", "Event post", "1", "3"],
         }
         for name, commands in cases.items():
