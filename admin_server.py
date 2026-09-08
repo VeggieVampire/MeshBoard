@@ -174,6 +174,7 @@ class AdminHandler(BaseHTTPRequestHandler):
             links = [
                 ("/", "Dashboard"),
                 ("/users", "Users"),
+                ("/addressbook", "AddressBook"),
                 ("/messages", "Mail"),
                 ("/board", "Board"),
                 ("/locations", "Locations"),
@@ -239,6 +240,7 @@ input {{ width: 100%; box-sizing: border-box; padding: 10px; margin: 6px 0 12px;
         routes = {
             "/": self.show_dashboard,
             "/users": self.show_users,
+            "/addressbook": self.show_addressbook,
             "/messages": self.show_messages,
             "/board": self.show_board,
             "/locations": self.show_locations,
@@ -275,6 +277,9 @@ input {{ width: 100%; box-sizing: border-box; padding: 10px; margin: 6px 0 12px;
             elif action == "/delete-user":
                 self.delete_user(data.get("node_id"))
                 self.redirect("/users?deleted=1")
+            elif action == "/remove-addressbook":
+                self.set_addressbook_listed(data.get("node_id"), False)
+                self.redirect("/addressbook?removed=1")
             elif action == "/close-checkin":
                 self.close_checkin(data.get("id"))
                 self.redirect("/checkins?closed=1")
@@ -316,6 +321,13 @@ input {{ width: 100%; box-sizing: border-box; padding: 10px; margin: 6px 0 12px;
             counts = {}
             for table in ("users", "messages", "board_posts", "locations", "checkin_events"):
                 counts[table] = conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"]
+            counts["addressbook"] = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM users
+                WHERE mail_listed = 1 AND display_name IS NOT NULL AND display_name != ''
+                """
+            ).fetchone()["count"]
         body = "<div class='grid'>" + "".join(
             f"<div class='card'><h2>{esc(name.replace('_', ' ').title())}</h2><p>{count}</p></div>"
             for name, count in counts.items()
@@ -335,6 +347,29 @@ input {{ width: 100%; box-sizing: border-box; padding: 10px; margin: 6px 0 12px;
             )
         body += "</table>"
         self.send_html("Users", body)
+
+    def show_addressbook(self):
+        with db_connect(self.config) as conn:
+            rows = conn.execute(
+                """
+                SELECT node_id, display_name, first_seen, last_seen
+                FROM users
+                WHERE mail_listed = 1 AND display_name IS NOT NULL AND display_name != ''
+                ORDER BY display_name COLLATE NOCASE, last_seen DESC
+                LIMIT 300
+                """
+            ).fetchall()
+        body = "<table><tr><th>ID</th><th>Node</th><th>First Seen</th><th>Last Seen</th><th></th></tr>"
+        for row in rows:
+            body += (
+                f"<tr><td>{esc(row['display_name'])}</td><td>{esc(row['node_id'])}</td>"
+                f"<td>{fmt_time(row['first_seen'])}</td><td>{fmt_time(row['last_seen'])}</td>"
+                f"<td>{form_button('/remove-addressbook', {'node_id': row['node_id']}, 'Remove')}</td></tr>"
+            )
+        if not rows:
+            body += "<tr><td colspan='5'>AddressBook is empty.</td></tr>"
+        body += "</table>"
+        self.send_html("AddressBook", body)
 
     def show_messages(self):
         with db_connect(self.config) as conn:
@@ -474,6 +509,12 @@ input {{ width: 100%; box-sizing: border-box; padding: 10px; margin: 6px 0 12px;
         with db_connect(self.config) as conn:
             conn.execute("DELETE FROM checkin_entries WHERE node_id = ?", (node_id,))
             conn.execute("DELETE FROM users WHERE node_id = ?", (node_id,))
+
+    def set_addressbook_listed(self, node_id, listed):
+        if not node_id:
+            return
+        with db_connect(self.config) as conn:
+            conn.execute("UPDATE users SET mail_listed = ? WHERE node_id = ?", (1 if listed else 0, node_id))
 
     def close_checkin(self, event_id):
         if not event_id:

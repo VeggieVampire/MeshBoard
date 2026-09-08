@@ -101,3 +101,46 @@ class AdminServerTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=5)
+
+    def test_addressbook_page_lists_and_removes_contacts(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "meshboard.db")
+            db = Database(db_path)
+            db.set_mail_listed("!cabn", "CABN", True)
+            db.set_display_name("!seen", "SEEN")
+            config = {
+                "host": "127.0.0.1",
+                "port": 0,
+                "username": "sysop",
+                "password_hash": make_password_hash("secret"),
+                "session_secret": "test-secret",
+                "database": {"path": db_path},
+            }
+            server = ThreadingHTTPServer(("127.0.0.1", 0), AdminHandler)
+            server.config = config
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base = f"http://127.0.0.1:{server.server_address[1]}"
+                opener = build_opener(HTTPCookieProcessor(CookieJar()))
+                login_data = urlencode({"username": "sysop", "password": "secret"}).encode("utf-8")
+                with opener.open(Request(f"{base}/login", data=login_data, method="POST")):
+                    pass
+
+                with opener.open(f"{base}/addressbook") as response:
+                    addressbook = response.read().decode("utf-8")
+                self.assertIn("AddressBook", addressbook)
+                self.assertIn("CABN", addressbook)
+                self.assertIn("!cabn", addressbook)
+                self.assertNotIn("!seen", addressbook)
+
+                remove_data = urlencode({"node_id": "!cabn"}).encode("utf-8")
+                with opener.open(Request(f"{base}/remove-addressbook", data=remove_data, method="POST")):
+                    pass
+
+                self.assertEqual([], Database(db_path).list_mail_contacts())
+                self.assertIsNotNone(Database(db_path).get_user("!cabn"))
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
