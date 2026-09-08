@@ -3,10 +3,10 @@ menu_name = "Escape Room"  # Required for module loading
 def display_menu():
     # Display the introduction and instructions for the Escape Room game
     return (
-        "Welcome to the Escape Room!\n"
-        "You are locked in a room. Explore, solve puzzles, and escape!\n"
-        "Use commands like 'north', 'south', 'east', 'west', 'examine', 'pick up', and 'use'.\n"
-        "'cd ..' to return to the main menu."
+        "Escape Room\n"
+        "Explore, solve puzzles, and escape.\n"
+        "Commands: look, north, south, east, west, examine, pick up, use, inventory\n"
+        "cd .. - Back"
     )
 
 def init_game():

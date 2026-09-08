@@ -3,10 +3,10 @@ import random
 menu_name = "Tic Tac Toe"  # Required for module loading
 
 def display_menu():
-    return "Welcome to Tic Tac Toe!\n" \
+    return "Tic Tac Toe\n" \
            "1. Player vs Player\n" \
            "2. Player vs Computer\n" \
-           "'cd ..' to return to the main menu."
+           "cd .. - Back"
 
 def init_game(mode):
     """Initialize a new game state."""

@@ -29,6 +29,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS users (
                     node_id TEXT PRIMARY KEY,
                     display_name TEXT,
+                    mail_listed INTEGER NOT NULL DEFAULT 0,
                     first_seen INTEGER NOT NULL,
                     last_seen INTEGER NOT NULL
                 );
@@ -68,6 +69,12 @@ class Database:
                 );
                 """
             )
+            columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(users)").fetchall()
+            }
+            if "mail_listed" not in columns:
+                conn.execute("ALTER TABLE users ADD COLUMN mail_listed INTEGER NOT NULL DEFAULT 0")
 
     def upsert_user(self, node_id, display_name=None, seen_at=None):
         seen_at = int(seen_at or time.time())
@@ -99,6 +106,24 @@ class Database:
     def set_display_name(self, node_id, display_name):
         self.upsert_user(node_id, display_name=display_name)
 
+    def set_mail_listed(self, node_id, display_name, listed=True):
+        self.upsert_user(node_id, display_name=display_name)
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE users SET mail_listed = ? WHERE node_id = ?",
+                (1 if listed else 0, node_id),
+            )
+
+    def list_mail_contacts(self):
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT * FROM users
+                WHERE mail_listed = 1 AND display_name IS NOT NULL AND display_name != ''
+                ORDER BY display_name COLLATE NOCASE, node_id
+                """
+            ).fetchall()
+
     def display_name_for(self, node_id):
         row = self.get_user(node_id)
         if row and row["display_name"]:
@@ -125,6 +150,17 @@ class Database:
         sql += " ORDER BY created_at DESC, id DESC"
         with self.connect() as conn:
             return conn.execute(sql, params).fetchall()
+
+    def archived_inbox(self, recipient_id):
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT * FROM messages
+                WHERE recipient_id = ? AND deleted_by_recipient = 1
+                ORDER BY created_at DESC, id DESC
+                """,
+                (recipient_id,),
+            ).fetchall()
 
     def sent(self, sender_id):
         with self.connect() as conn:
@@ -177,6 +213,17 @@ class Database:
         with self.connect() as conn:
             conn.execute(f"UPDATE messages SET {column} = 1 WHERE id = ?", (message_id,))
         return True
+
+    def delete_archived_message(self, message_id, user_id):
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM messages
+                WHERE id = ? AND recipient_id = ? AND deleted_by_recipient = 1
+                """,
+                (message_id, user_id),
+            )
+            return cursor.rowcount > 0
 
     def save_location(self, creator_id, creator_name, latitude, longitude, altitude, body, visibility="public"):
         now = int(time.time())

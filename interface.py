@@ -1,6 +1,7 @@
 import os
 import logging
 import time
+import threading
 from config import load_config, CONFIG_FILE
 from time_service import TimeSyncService
 
@@ -233,32 +234,83 @@ class Interface:
             logger.error("Cannot send message to %s because the interface is disconnected.", user_id)
             return
         try:
-            destination = int(user_id.lstrip("!"), 16)  # Remove `!` and convert to int
             for chunk in self.chunk_message(message):
-                def onAckNak(packet):
-                    routing = packet.get("decoded", {}).get("routing", {})
-                    error = routing.get("errorReason", "NONE")
-                    request_id = routing.get("requestId")
-                    if error == "NONE":
-                        logger.info("Reply ACK received from %s for packet %s", user_id, request_id)
-                    else:
-                        logger.warning("Reply NAK from %s for packet %s: %s", user_id, request_id, error)
-
-                sent_packet = self.interface.sendText(
-                    chunk,
-                    destinationId=destination,
-                    wantAck=True,
-                    onResponse=onAckNak,
-                    replyId=reply_id,
-                )
-                logger.info("Queued reply to %s as packet %s", user_id, getattr(sent_packet, "id", "unknown"))
-                logger.info("Reply text to %s: %r", user_id, chunk)
-                reply_id = None
+                self._send_chunk_with_ack_retries(user_id, chunk)
                 delay = self.config["meshtastic"].get("chunk_delay_seconds", 0)
                 if delay:
                     time.sleep(delay)
         except Exception as e:
             logger.error(f"Failed to send message to {user_id}: {e}")
+
+    def _send_chunk_with_ack_retries(self, user_id, chunk):
+        timeout = float(self.config["meshtastic"].get("ack_timeout_seconds", 7))
+        retries = int(self.config["meshtastic"].get("ack_retries", 3))
+        max_attempts = retries + 1
+
+        for attempt in range(1, max_attempts + 1):
+            ack_event = threading.Event()
+            result = {"status": "timeout", "request_id": None, "error": None}
+
+            def onAckNak(packet):
+                routing = packet.get("decoded", {}).get("routing", {})
+                error = routing.get("errorReason", "NONE")
+                result["request_id"] = routing.get("requestId")
+                result["error"] = error
+                result["status"] = "ack" if error == "NONE" else "nak"
+                ack_event.set()
+
+            sent_packet = self.interface.sendText(
+                chunk,
+                destinationId=user_id,
+                wantAck=True,
+                onResponse=onAckNak,
+            )
+            sent_id = getattr(sent_packet, "id", "unknown")
+            logger.info(
+                "Queued reply to %s as packet %s (attempt %s/%s)",
+                user_id,
+                sent_id,
+                attempt,
+                max_attempts,
+            )
+            logger.info("Reply text to %s: %r", user_id, chunk)
+
+            if not ack_event.wait(timeout):
+                if attempt < max_attempts:
+                    logger.warning(
+                        "No ACK from %s for packet %s after %.1f seconds. Retrying (%s/%s).",
+                        user_id,
+                        sent_id,
+                        timeout,
+                        attempt,
+                        retries,
+                    )
+                    continue
+                logger.error(
+                    "No ACK from %s for packet %s after %s attempts.",
+                    user_id,
+                    sent_id,
+                    max_attempts,
+                )
+                return False
+
+            if result["status"] == "ack":
+                logger.info(
+                    "Reply ACK received from %s for packet %s",
+                    user_id,
+                    result["request_id"] or sent_id,
+                )
+                return True
+
+            logger.warning(
+                "Reply NAK from %s for packet %s: %s",
+                user_id,
+                result["request_id"] or sent_id,
+                result["error"],
+            )
+            return False
+
+        return False
 
     def chunk_message(self, message):
         max_length = int(self.config["meshtastic"].get("max_text_length", 180))

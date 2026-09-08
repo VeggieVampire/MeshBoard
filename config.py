@@ -23,8 +23,10 @@ DEFAULT_CONFIG = {
         "log_raw_history": False,
     },
     "meshtastic": {
-        "max_text_length": 180,
+        "max_text_length": 140,
         "chunk_delay_seconds": 0.5,
+        "ack_timeout_seconds": 7,
+        "ack_retries": 3,
         "reconnect_delay_seconds": 10,
     },
     "time_sync": {

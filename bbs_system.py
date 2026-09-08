@@ -8,6 +8,31 @@ from interface import Interface
 from location_service import location_age, stale_location_message
 
 
+MAIN_MENU_ORDER = ("Location", "Games", "Mail")
+GAMES_MENU_ORDER = ("Hot Cold", "ZORK", "Tic Tac Toe", "Escape Room")
+
+
+def normalize_command(command):
+    command_clean = command.strip()
+    command_lower = command_clean.lower()
+    if command_lower == "top":
+        return "top"
+    if command_lower in ("cd ..", "cd.."):
+        return "cd .."
+    return command_lower
+
+
+def order_menu_items(menu_items, preferred_order=()):
+    ordered = {}
+    for name in preferred_order:
+        if name in menu_items:
+            ordered[name] = menu_items[name]
+    for name in sorted(menu_items):
+        if name not in ordered:
+            ordered[name] = menu_items[name]
+    return ordered
+
+
 class BBSSystem:
     def __init__(self, config=None, database=None, interface=None):
         self.config = config or load_config()
@@ -82,7 +107,8 @@ class BBSSystem:
                         except Exception as e:
                             print(f"Error loading submodule '{sub_module_name}': {e}")
                 if submenu:
-                    menu_modules[item] = {"submodules": submenu}
+                    menu_modules[item] = {"submodules": order_menu_items(submenu, GAMES_MENU_ORDER)}
+        menu_modules = order_menu_items(menu_modules, MAIN_MENU_ORDER)
         print(f"Loaded modules: {list(menu_modules.keys())}")
         return menu_modules
 
@@ -153,7 +179,7 @@ class BBSSystem:
         Process commands based on the user's current menu.
         """
         command_clean = command.strip()
-        command_lower = command_clean.lower()
+        command_lower = normalize_command(command_clean)
         current_menu = self.users[user_id]["menu"][-1]  # Get the current menu from the stack
 
         # Handle global navigation commands before module-specific handlers.
@@ -162,7 +188,11 @@ class BBSSystem:
             self.users[user_id].pop("module_control", None)
             return self.display_menu(user_id)
         elif command_lower == "cd ..":  # Go back one menu level
-            self.users[user_id].pop("module_control", None)
+            if self.users[user_id].pop("module_control", None):
+                menu_data = self.menu_modules.get(current_menu)
+                if hasattr(menu_data, "display_menu"):
+                    return menu_data.display_menu()
+                return self.display_menu(user_id)
             if len(self.users[user_id]["menu"]) > 1:
                 self.users[user_id]["menu"].pop()  # Remove the last menu
                 return self.display_menu(user_id)

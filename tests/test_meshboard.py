@@ -4,12 +4,14 @@ import time
 import unittest
 
 import interface as interface_module
-from bbs_system import BBSSystem
+from bbs_system import BBSSystem, normalize_command
 from config import DEFAULT_CONFIG
 from database import Database
 from interface import Interface
 from location_service import distance_between_locations
 from modules.Location import process_command as location_command
+from modules import Mail
+from modules.Games import escape_room, hot_cold, tic_tac_toe, zork
 
 
 class DummyInterface:
@@ -33,6 +35,8 @@ def test_config(db_path):
     config["meshtastic"] = {
         "max_text_length": 40,
         "chunk_delay_seconds": 0,
+        "ack_timeout_seconds": 0.01,
+        "ack_retries": 0,
         "reconnect_delay_seconds": 1,
     }
     return config
@@ -149,12 +153,128 @@ class MeshBoardTests(unittest.TestCase):
         self.assertNotIn("module_control", self.bbs.users[user])
         self.assertEqual(["main"], self.bbs.users[user]["menu"])
 
+    def test_global_command_aliases_are_normalized(self):
+        self.assertEqual("top", normalize_command("top"))
+        self.assertEqual("top", normalize_command("Top"))
+        self.assertEqual("cd ..", normalize_command("cd .."))
+        self.assertEqual("cd ..", normalize_command("Cd .. "))
+        self.assertEqual("cd ..", normalize_command("cd.."))
+        self.assertEqual("cd ..", normalize_command("Cd.."))
+
+    def test_cd_dot_dot_returns_to_current_module_menu_once(self):
+        user = "!abc12345"
+        for command in ("cd ..", "Cd .. ", "cd..", "Cd.."):
+            with self.subTest(command=command):
+                self.bbs.users[user] = {"menu": ["main", "Mail"], "module_control": Mail}
+
+                response = self.bbs.handle_message(user, command)
+
+                self.assertIn("Mail", response)
+                self.assertNotIn("Main Menu", response)
+                self.assertNotIn("module_control", self.bbs.users[user])
+                self.assertEqual(["main", "Mail"], self.bbs.users[user]["menu"])
+
+    def test_mail_addressbook_opt_in_and_paged_send(self):
+        user = "!sender"
+        self.bbs.users[user] = {"menu": ["main"]}
+        menu = Mail.display_menu()
+        self.assertIn("1. Inbox", menu)
+        self.assertIn("2. Send", menu)
+        self.assertIn("3. Add AddressBook", menu)
+        self.assertIn("4. Archive", menu)
+
+        self.assertIn("Add you", Mail.process_command(user, "add addressBook", self.bbs))
+        self.assertIn("simple ID", Mail.process_command(user, "yes", self.bbs))
+        self.assertEqual("Added to AddressBook as Sender.", Mail.process_command(user, "Sender", self.bbs))
+
+        for index in range(9):
+            self.bbs.db.set_mail_listed(f"!node{index}", f"User{index}", True)
+
+        response = Mail.process_command(user, "send", self.bbs)
+        self.assertIn("1. Sender", response)
+        self.assertIn("9. Next", response)
+        response = Mail.process_command(user, "9", self.bbs)
+        self.assertIn("AddressBook 9-10", response)
+
+    def test_mail_inbox_archive_and_reply(self):
+        sender = "!sender"
+        recipient = "!recipient"
+        self.bbs.db.set_mail_listed(sender, "Sender", True)
+        self.bbs.db.set_mail_listed(recipient, "Recipient", True)
+        self.bbs.db.send_message(sender, recipient, "Gate is fixed.")
+
+        self.bbs.users[recipient] = {"menu": ["main"]}
+        inbox = Mail.process_command(recipient, "inbox", self.bbs)
+        self.assertIn("Sender", inbox)
+
+        detail = Mail.process_command(recipient, "1", self.bbs)
+        self.assertIn("Reply REPLY", detail)
+        self.assertEqual(0, self.bbs.db.unread_count(recipient))
+
+        reply_prompt = Mail.process_command(recipient, "reply", self.bbs)
+        self.assertIn("Reply to Sender", reply_prompt)
+        sent = Mail.process_command(recipient, "Thanks", self.bbs)
+        self.assertIn("Message saved for Sender", sent)
+        self.assertEqual("Thanks", self.bbs.db.inbox(sender)[0]["body"])
+
+        Mail.process_command(recipient, "inbox", self.bbs)
+        Mail.process_command(recipient, "1", self.bbs)
+        archived = Mail.process_command(recipient, "archive", self.bbs)
+        self.assertIn("Message archived", archived)
+        self.assertEqual([], self.bbs.db.inbox(recipient))
+
+        archive = Mail.process_command(recipient, "archive", self.bbs)
+        self.assertIn("Gate is fixed.", archive)
+        deleted = Mail.process_command(recipient, "delete 1", self.bbs)
+        self.assertIn("Archived message deleted", deleted)
+        self.assertEqual([], self.bbs.db.archived_inbox(recipient))
+
     def test_chunk_long_outgoing_messages(self):
         interface = Interface(test_config(self.db_path))
         chunks = interface.chunk_message("alpha beta gamma delta epsilon zeta eta theta")
         self.assertGreater(len(chunks), 1)
         self.assertTrue(all(len(chunk) <= 40 for chunk in chunks))
         self.assertEqual("alpha beta gamma delta epsilon zeta eta theta", " ".join(chunks))
+
+    def test_first_screen_menus_fit_single_radio_packet(self):
+        self.bbs.users["!abc12345"] = {"menu": ["main"]}
+        menus = [
+            self.bbs.display_menu("!abc12345"),
+            self.bbs.display_submenu("Games"),
+            Mail.display_menu(),
+            escape_room.display_menu(),
+            hot_cold.display_menu(),
+            tic_tac_toe.display_menu(),
+            zork.display_menu(),
+        ]
+
+        self.assertTrue(all(len(menu) <= 140 for menu in menus))
+
+    def test_non_location_menu_navigation(self):
+        game_entries = {
+            "1": "Hot Cold",
+            "2": "Zork",
+            "3": "Tic Tac Toe",
+            "4": "Escape Room",
+        }
+        for choice, title in game_entries.items():
+            with self.subTest(game=title):
+                user = f"!game{choice}"
+                self.assertIn("Main Menu", self.bbs.handle_message(user, "top"))
+                self.assertIn("Games Menu", self.bbs.handle_message(user, "2"))
+                self.assertIn(title, self.bbs.handle_message(user, choice))
+                self.assertIn("Games Menu", self.bbs.handle_message(user, "cd .."))
+
+        user = "!mailtest"
+        self.assertIn("Main Menu", self.bbs.handle_message(user, "top"))
+        self.assertIn("Mail", self.bbs.handle_message(user, "3"))
+        self.assertIn("Inbox", self.bbs.handle_message(user, "1"))
+        self.assertIn("Mail", self.bbs.handle_message(user, "back"))
+        self.assertIn("AddressBook", self.bbs.handle_message(user, "2"))
+        self.assertIn("Mail", self.bbs.handle_message(user, "back"))
+        self.assertIn("Add you", self.bbs.handle_message(user, "3"))
+        self.assertIn("Not added", self.bbs.handle_message(user, "no"))
+        self.assertIn("Archive", self.bbs.handle_message(user, "4"))
 
     def test_broadcast_text_is_ignored(self):
         mesh_interface = Interface(test_config(self.db_path))
@@ -186,6 +306,75 @@ class MeshBoardTests(unittest.TestCase):
         }, None)
 
         self.assertEqual([("!sender", "ok", 2)], sent)
+
+    def test_outgoing_dm_replies_do_not_use_thread_reply_id(self):
+        class FakePacket:
+            id = 123
+
+        class FakeRadio:
+            def __init__(self):
+                self.calls = []
+
+            def sendText(self, *args, **kwargs):
+                self.calls.append((args, kwargs))
+                kwargs["onResponse"]({"decoded": {"routing": {"errorReason": "NONE", "requestId": 123}}})
+                return FakePacket()
+
+        mesh_interface = Interface(test_config(self.db_path))
+        mesh_interface.interface = FakeRadio()
+
+        mesh_interface.send_message("!433bed54", "Mail", reply_id=99)
+
+        self.assertEqual("Mail", mesh_interface.interface.calls[0][0][0])
+        self.assertEqual("!433bed54", mesh_interface.interface.calls[0][1]["destinationId"])
+        self.assertTrue(mesh_interface.interface.calls[0][1]["wantAck"])
+        self.assertNotIn("replyId", mesh_interface.interface.calls[0][1])
+
+    def test_outgoing_dm_retries_three_times_without_ack(self):
+        class FakePacket:
+            id = 123
+
+        class FakeRadio:
+            def __init__(self):
+                self.calls = []
+
+            def sendText(self, *args, **kwargs):
+                self.calls.append((args, kwargs))
+                return FakePacket()
+
+        config = test_config(self.db_path)
+        config["meshtastic"]["ack_timeout_seconds"] = 0.01
+        config["meshtastic"]["ack_retries"] = 3
+        mesh_interface = Interface(config)
+        mesh_interface.interface = FakeRadio()
+
+        mesh_interface.send_message("!433bed54", "Mail")
+
+        self.assertEqual(4, len(mesh_interface.interface.calls))
+        self.assertTrue(all(call[1]["destinationId"] == "!433bed54" for call in mesh_interface.interface.calls))
+
+    def test_outgoing_dm_stops_retrying_after_ack(self):
+        class FakePacket:
+            id = 123
+
+        class FakeRadio:
+            def __init__(self):
+                self.calls = []
+
+            def sendText(self, *args, **kwargs):
+                self.calls.append((args, kwargs))
+                kwargs["onResponse"]({"decoded": {"routing": {"errorReason": "NONE", "requestId": 123}}})
+                return FakePacket()
+
+        config = test_config(self.db_path)
+        config["meshtastic"]["ack_timeout_seconds"] = 0.01
+        config["meshtastic"]["ack_retries"] = 3
+        mesh_interface = Interface(config)
+        mesh_interface.interface = FakeRadio()
+
+        mesh_interface.send_message("!433bed54", "Mail")
+
+        self.assertEqual(1, len(mesh_interface.interface.calls))
 
     def test_wifi_transport_connects_with_hostname_and_port(self):
         calls = []

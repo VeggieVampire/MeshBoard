@@ -15,7 +15,7 @@ MeshBoard also keeps the attached radio clock sane. On startup it sets the Mesht
 - Saved location notes, nearby note lookup, and Hot Cold GPS gameplay.
 - USB serial first, with WiFi/TCP and Bluetooth/BLE fallback.
 - Chunked replies for long Meshtastic text responses.
-- ACK-requesting replies tagged with the incoming packet ID so clients can correlate responses.
+- ACK-requesting replies with 3 automatic retries when no ACK arrives within 7 seconds.
 - Automatic Meshtastic radio time sync from the host clock and nearby mesh packet timestamps.
 
 ## Architecture
@@ -70,8 +70,10 @@ Example `meshtastic_config.json`:
         "log_raw_history": false
     },
     "meshtastic": {
-        "max_text_length": 180,
+        "max_text_length": 140,
         "chunk_delay_seconds": 0.5,
+        "ack_timeout_seconds": 7,
+        "ack_retries": 3,
         "reconnect_delay_seconds": 10
     },
     "time_sync": {
