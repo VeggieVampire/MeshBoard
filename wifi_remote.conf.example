@@ -1,0 +1,19 @@
+# Copy this file to wifi_remote.conf and edit it with vi on the Pi.
+# The retry script reads this file repeatedly, so changes apply without reboot.
+
+ENABLED=false
+SSID=YourHotspotName
+PSK=YourHotspotPassword
+
+# Use auto to pick the first WiFi device, or set a specific device such as wlan0.
+INTERFACE=auto
+
+# Reuse this NetworkManager connection name when saving hotspot details.
+CONNECTION_NAME=MeshBoardRemoteHotspot
+
+# When true, MeshBoard only tries this hotspot when the WiFi interface is not
+# already connected to something else.
+CONNECT_ONLY_WHEN_OFFLINE=true
+
+# How often to retry while ENABLED=true.
+CHECK_INTERVAL_SECONDS=60

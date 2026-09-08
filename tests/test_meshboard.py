@@ -140,8 +140,20 @@ class MeshBoardTests(unittest.TestCase):
 
     def test_new_user_first_message_is_processed(self):
         response = self.bbs.handle_message("!newuser", "hello")
+        self.assertIn("Hello. This is MeshBoard", response)
         self.assertIn("Main Menu", response)
-        self.assertIn("Invalid", response)
+        self.assertNotIn("Invalid", response)
+
+    def test_unknown_main_menu_text_shows_first_contact_help(self):
+        user = "!passerby"
+        self.bbs.handle_message(user, "top")
+
+        response = self.bbs.handle_message(user, "hello there")
+
+        self.assertIn("Hello. This is MeshBoard", response)
+        self.assertIn("send top", response.lower())
+        self.assertIn("Main Menu", response)
+        self.assertNotIn("Invalid", response)
 
     def test_top_returns_to_main_menu_from_module_control(self):
         user = "!abc12345"
@@ -158,10 +170,32 @@ class MeshBoardTests(unittest.TestCase):
     def test_global_command_aliases_are_normalized(self):
         self.assertEqual("top", normalize_command("top"))
         self.assertEqual("top", normalize_command("Top"))
+        self.assertEqual("top", normalize_command("menu"))
+        self.assertEqual("top", normalize_command("Main Menu"))
         self.assertEqual("cd ..", normalize_command("cd .."))
         self.assertEqual("cd ..", normalize_command("Cd .. "))
         self.assertEqual("cd ..", normalize_command("cd.."))
         self.assertEqual("cd ..", normalize_command("Cd.."))
+
+    def test_menu_aliases_show_main_menu_without_first_contact_help(self):
+        for command in ("menu", "Main Menu"):
+            with self.subTest(command=command):
+                response = self.bbs.handle_message(f"!menu{command}", command)
+
+                self.assertIn("Main Menu", response)
+                self.assertNotIn("Hello. This is MeshBoard", response)
+
+    def test_any_unknown_words_at_main_menu_show_first_contact_help(self):
+        for command in ("hello", "test message", "what is this", "any words here"):
+            with self.subTest(command=command):
+                user = f"!words{len(command)}"
+                self.bbs.handle_message(user, "top")
+
+                response = self.bbs.handle_message(user, command)
+
+                self.assertIn("Hello. This is MeshBoard", response)
+                self.assertIn("Main Menu", response)
+                self.assertNotIn("Invalid", response)
 
     def test_cd_dot_dot_returns_to_current_module_menu_once(self):
         user = "!abc12345"
@@ -361,6 +395,40 @@ class MeshBoardTests(unittest.TestCase):
 
         self.assertIsNotNone(self.bbs.db.active_checkin_event(now=1000 + 86399))
         self.assertIsNone(self.bbs.db.active_checkin_event(now=1000 + 86400))
+
+    def test_event_post_back_returns_to_event_posts(self):
+        user = "!eventposter"
+        self.bbs.users[user] = {"menu": ["main"]}
+
+        self.bbs.handle_message(user, "5")
+        self.bbs.handle_message(user, "4")
+        self.bbs.handle_message(user, "3")
+        self.bbs.handle_message(user, "post")
+        self.bbs.handle_message(user, "Net at 7pm.")
+        detail = self.bbs.handle_message(user, "1")
+        back = self.bbs.handle_message(user, "3")
+
+        self.assertIn("From:", detail)
+        self.assertIn("Events Posts", back)
+        self.assertIn("Net at 7pm.", back)
+
+    def test_new_menu_hardening_sequences_do_not_crash(self):
+        cases = {
+            "main": ["weather?", "0", "999", "menu", "main menu"],
+            "seen": ["top", "4", "next", "wat", "cd .."],
+            "mail": ["top", "3", "wat", "2", "x", "9", "back", "3", "12", "AB C", "HOME"],
+            "board": ["top", "5", "wat", "0", "6", "post", "", "Header text", "back"],
+            "events": ["top", "5", "4", "wat", "1", "2", "3", "post", "", "Event post", "1", "3"],
+        }
+        for name, commands in cases.items():
+            with self.subTest(name=name):
+                user = f"!hard{name}"
+                self.bbs.db.set_mail_listed("!h1", "H001", True)
+                self.bbs.db.set_mail_listed(user, name[:4].upper(), True)
+                for command in commands:
+                    response = self.bbs.handle_message(user, command)
+                    self.assertIsInstance(response, str)
+                    self.assertTrue(response.strip())
 
     def test_broadcast_text_is_ignored(self):
         mesh_interface = Interface(test_config(self.db_path))

@@ -145,7 +145,9 @@ def process_command(user_id, command, bbs_system):
 
     if state["state"] == "post":
         if command_lower in ("3", "back"):
-            state["state"] = "category"
+            state["state"] = state.get("return_state", "category")
+            if state["state"] == "event_posts":
+                return _render_board_posts(state, bbs_system)
             return _render_category(state, bbs_system)
         post = bbs_system.db.get_board_post(state["post_id"])
         return _render_post(post, bbs_system) if post else _render_category(state, bbs_system)
@@ -181,6 +183,7 @@ def process_command(user_id, command, bbs_system):
             if 0 <= index < len(posts):
                 state["state"] = "post"
                 state["post_id"] = posts[index]["id"]
+                state["return_state"] = "category"
                 return _render_post(posts[index], bbs_system)
         return _render_category(state, bbs_system)
 
@@ -200,6 +203,7 @@ def process_command(user_id, command, bbs_system):
             if 0 <= index < len(posts):
                 state["state"] = "post"
                 state["post_id"] = posts[index]["id"]
+                state["return_state"] = "event_posts"
                 return _render_post(posts[index], bbs_system)
         return _render_board_posts(state, bbs_system)
 

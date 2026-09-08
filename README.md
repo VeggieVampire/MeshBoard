@@ -15,6 +15,7 @@ MeshBoard also keeps the attached radio clock sane. On startup it sets the Mesht
 - Who's Been Here list showing recent MeshBoard users, newest first.
 - Message Board categories for general discussion, local news, trading, events, rumors, and a short header channel.
 - Events check-in board with a 24-hour HAM-style roster from AddressBook.
+- Local SysOp admin website for viewing and deleting database content from the LAN or hotspot.
 - Live GPS-aware Location tools using the sender node's latest Meshtastic position.
 - Saved location notes, nearby note lookup, and Hot Cold GPS gameplay.
 - USB serial first, with WiFi/TCP and Bluetooth/BLE fallback.
@@ -27,6 +28,7 @@ MeshBoard also keeps the attached radio clock sane. On startup it sets the Mesht
 - `interface.py` owns the Meshtastic connection, direct-message filtering, incoming text/position packets, and outgoing replies.
 - `bbs_system.py` owns per-node sessions, dynamic module loading, unread mail notices, and latest in-memory GPS state.
 - `database.py` initializes and accesses `meshboard.db`.
+- `admin_server.py` provides the local SysOp admin website.
 - `location_service.py` contains GPS freshness and Haversine helpers.
 - `modules/Mail/` provides inbox, send, AddressBook opt-in, reply, and archive flows.
 - `modules/MessageBoard/` provides public board categories and Events check-ins.
@@ -153,6 +155,83 @@ nohup "$HOME/MeshBoard/scripts/run_meshboard_forever.sh" >/dev/null 2>&1 &
 ```
 
 The launcher uses `/tmp/meshboard.lock` so a second copy exits instead of fighting for the USB radio. Logs still go to `listener.log`.
+
+## Remote Hotspot WiFi Fallback
+
+For remote trips, you can keep a disabled hotspot config on the Pi and enable it when you need emergency SSH access. MeshBoard includes a NetworkManager helper for Raspberry Pi OS/OSMC systems that have `nmcli`.
+
+Create the editable config:
+
+```bash
+cd /home/osmc/MeshBoard
+cp wifi_remote.conf.example wifi_remote.conf
+vi wifi_remote.conf
+```
+
+Example:
+
+```text
+ENABLED=true
+SSID=MyPhoneHotspot
+PSK=hotspot-password-here
+INTERFACE=auto
+CONNECTION_NAME=MeshBoardRemoteHotspot
+CONNECT_ONLY_WHEN_OFFLINE=true
+CHECK_INTERVAL_SECONDS=60
+```
+
+Install the retry helper at boot:
+
+```bash
+chmod +x /home/osmc/MeshBoard/scripts/run_wifi_connect_forever.sh
+(crontab -l 2>/dev/null; echo '@reboot APP_DIR=/home/osmc/MeshBoard /home/osmc/MeshBoard/scripts/run_wifi_connect_forever.sh') | crontab -
+nohup /home/osmc/MeshBoard/scripts/run_wifi_connect_forever.sh >/dev/null 2>&1 &
+```
+
+The helper rereads `wifi_remote.conf` every retry cycle. If `ENABLED=true` and the WiFi interface is offline, it tries to connect to the configured hotspot. Use `INTERFACE=auto` to pick the first WiFi device, or set a specific device such as `wlan0`. If `CONNECT_ONLY_WHEN_OFFLINE=true`, it leaves an already-connected WiFi network alone. Logs go to `wifi-connect.log`.
+
+Useful checks:
+
+```bash
+tail -f /home/osmc/MeshBoard/wifi-connect.log
+nmcli device status
+nmcli connection show MeshBoardRemoteHotspot
+```
+
+## Local SysOp Admin Website
+
+MeshBoard can run a local-only admin website for SysOp maintenance when you are on the same LAN or phone hotspot as the Pi. It does not need the public internet. Open it from a phone or laptop at:
+
+```text
+http://<pi-ip>:8080
+```
+
+On the current OSMC install, that is usually:
+
+```text
+http://192.168.4.100:8080
+```
+
+Create and enable the admin config:
+
+```bash
+cd /home/osmc/MeshBoard
+cp admin_config.json.example admin_config.json
+.venv/bin/python admin_server.py --hash-password
+vi admin_config.json
+```
+
+Set `enabled` to `true`, keep `username` as `sysop` or change it, paste the generated hash into `password_hash`, and change `session_secret` to any long random text.
+
+Install the admin website at boot:
+
+```bash
+chmod +x /home/osmc/MeshBoard/scripts/run_admin_forever.sh
+(crontab -l 2>/dev/null; echo '@reboot APP_DIR=/home/osmc/MeshBoard /home/osmc/MeshBoard/scripts/run_admin_forever.sh') | crontab -
+nohup /home/osmc/MeshBoard/scripts/run_admin_forever.sh >/dev/null 2>&1 &
+```
+
+Admin pages include users, Mail messages, Message Board posts, location notes, check-ins, and recent logs. Delete/close buttons change `meshboard.db` immediately, so use them like a real SysOp console.
 
 ## Connection Options
 

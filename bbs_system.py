@@ -15,7 +15,7 @@ GAMES_MENU_ORDER = ("Hot Cold", "ZORK", "Tic Tac Toe", "Escape Room")
 def normalize_command(command):
     command_clean = command.strip()
     command_lower = command_clean.lower()
-    if command_lower == "top":
+    if command_lower in ("top", "menu", "main menu"):
         return "top"
     if command_lower in ("cd ..", "cd.."):
         return "cd .."
@@ -31,6 +31,14 @@ def order_menu_items(menu_items, preferred_order=()):
         if name not in ordered:
             ordered[name] = menu_items[name]
     return ordered
+
+
+def is_number_choice(command):
+    try:
+        int(command.strip())
+        return True
+    except ValueError:
+        return False
 
 
 class BBSSystem:
@@ -122,7 +130,7 @@ class BBSSystem:
             if message.strip():
                 response = self.process_command(user_id, message)
                 if response.startswith("Invalid"):
-                    return f"{welcome}\n\n{response}"
+                    return self.first_contact_message(user_id)
                 return response
             return welcome
         else:
@@ -135,6 +143,13 @@ class BBSSystem:
         """
         self.users[user_id] = {"menu": ["main"]}  # Menu stack to track navigation
         return self.display_menu(user_id)
+
+    def first_contact_message(self, user_id):
+        return (
+            "Hello. This is MeshBoard, a local text BBS over Meshtastic.\n"
+            "Send a number to choose a menu item, or send top any time to restart.\n\n"
+            f"{self.display_menu(user_id)}"
+        )
 
     def update_node_location(self, user_id, position):
         latitude = position.get("latitude")
@@ -206,7 +221,10 @@ class BBSSystem:
 
         # Handle menu-specific commands
         if current_menu == "main":
-            return self.handle_main_menu(user_id, command)
+            response = self.handle_main_menu(user_id, command)
+            if response.startswith("Invalid") and not is_number_choice(command):
+                return self.first_contact_message(user_id)
+            return response
         elif current_menu in self.menu_modules:
             menu_data = self.menu_modules[current_menu]
             if isinstance(menu_data, dict) and "submodules" in menu_data:
