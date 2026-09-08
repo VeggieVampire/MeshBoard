@@ -5,7 +5,7 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=%h/MeshBoard
-ExecStart=%h/MeshBoard/.venv/bin/python %h/MeshBoard/bbs_system.py
+ExecStart=%h/MeshBoard/scripts/run_meshboard_forever.sh
 Restart=on-failure
 RestartSec=10
 

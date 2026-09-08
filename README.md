@@ -38,22 +38,40 @@ MeshBoard also keeps the attached radio clock sane. On startup it sets the Mesht
 
 ## Install On A Pi Or OSMC Host
 
-These steps install as whichever Linux user runs them. The default app directory is `~/MeshBoard`, and the service is a user-level systemd service using `%h`, so it does not depend on a specific username.
+These steps install as whichever Linux user runs them. The default app directory is `~/MeshBoard`, and the service/startup entries do not depend on a specific username.
 
 ```bash
-sudo apt update
-sudo apt install -y git python3-venv python3-pip python3-serial
 git clone https://github.com/VeggieVampire/MeshBoard.git
 cd MeshBoard
-python3 -m venv .venv
-.venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install meshtastic
+scripts/install_pi.sh
 ```
 
-Create config:
+The installer does the full default setup:
+
+- Installs Linux packages and Python dependencies.
+- Installs MeshBoard to `~/MeshBoard` unless `APP_DIR` is set.
+- Creates `meshtastic_config.json`, detecting USB when available and falling back to safe auto-connection defaults.
+- Creates `admin_config.json`, enables the admin website, generates a private admin password, and saves it to `admin_credentials.txt`.
+- Creates disabled `wifi_remote.conf` so hotspot access can be enabled later by editing one file.
+- Installs startup entries for MeshBoard, the admin website, and the WiFi helper.
+- Starts MeshBoard and the admin website immediately.
+
+After install, find the admin login on the Pi:
 
 ```bash
-.venv/bin/python setup.py
+cat ~/MeshBoard/admin_credentials.txt
+```
+
+Override the destination with:
+
+```bash
+APP_DIR="$HOME/apps/MeshBoard" scripts/install_pi.sh
+```
+
+Use a specific admin password instead of a generated one:
+
+```bash
+MESHBOARD_ADMIN_PASSWORD='change-this-password' scripts/install_pi.sh
 ```
 
 For a USB radio, prefer a stable path from `/dev/serial/by-id/` instead of `/dev/ttyUSB0`.
@@ -99,59 +117,26 @@ Example `meshtastic_config.json`:
 }
 ```
 
-Install the user service:
-
-```bash
-mkdir -p ~/.config/systemd/user
-cp systemd/meshboard.service ~/.config/systemd/user/meshboard.service
-systemctl --user daemon-reload
-systemctl --user enable meshboard.service
-systemctl --user start meshboard.service
-systemctl --user status meshboard.service
-```
-
 View logs:
 
 ```bash
-tail -f listener.log
+tail -f ~/MeshBoard/listener.log
 ```
 
-If you want MeshBoard to start before that user logs in, enable linger:
+The installer tries to enable the user service and also installs cron `@reboot` fallback entries. If you want the user service to start before that user logs in, enable linger:
 
 ```bash
 sudo loginctl enable-linger "$USER"
 ```
 
-USB serial usually requires access to the serial device:
-
-```bash
-sudo usermod -aG dialout "$USER"
-```
-
-Log out and back in after changing groups.
-
-## Optional Installer Script
-
-From the repo root:
-
-```bash
-scripts/install_pi.sh
-```
-
-By default it installs to `~/MeshBoard`. Override the destination with:
-
-```bash
-APP_DIR="$HOME/apps/MeshBoard" scripts/install_pi.sh
-```
+The installer adds the current user to `dialout` for USB serial access. On some systems, that group change does not affect existing sessions until logout/login or reboot.
 
 ## Offline Headless Startup
 
-A Pi without internet usually also has no reliable clock, and a user systemd service can stop when the SSH/login session ends unless linger is enabled. If you cannot enable linger with `sudo loginctl enable-linger "$USER"`, use the no-sudo cron launcher:
+A Pi without internet usually also has no reliable clock, and a user systemd service can stop when the SSH/login session ends unless linger is enabled. The installer sets up the no-sudo cron launcher automatically:
 
 ```bash
-chmod +x scripts/run_meshboard_forever.sh
-(crontab -l 2>/dev/null; echo '@reboot APP_DIR=$HOME/MeshBoard $HOME/MeshBoard/scripts/run_meshboard_forever.sh') | crontab -
-nohup "$HOME/MeshBoard/scripts/run_meshboard_forever.sh" >/dev/null 2>&1 &
+crontab -l
 ```
 
 The launcher uses `/tmp/meshboard.lock` so a second copy exits instead of fighting for the USB radio. Logs still go to `listener.log`.
@@ -160,12 +145,10 @@ The launcher uses `/tmp/meshboard.lock` so a second copy exits instead of fighti
 
 For remote trips, you can keep a disabled hotspot config on the Pi and enable it when you need emergency SSH access. MeshBoard includes a NetworkManager helper for Raspberry Pi OS/OSMC systems that have `nmcli`.
 
-Create the editable config:
+The installer creates the editable config:
 
 ```bash
-cd /home/osmc/MeshBoard
-cp wifi_remote.conf.example wifi_remote.conf
-vi wifi_remote.conf
+vi ~/MeshBoard/wifi_remote.conf
 ```
 
 Example:
@@ -180,12 +163,10 @@ CONNECT_ONLY_WHEN_OFFLINE=true
 CHECK_INTERVAL_SECONDS=60
 ```
 
-Install the retry helper at boot:
+The installer adds the retry helper at boot and starts it immediately. It stays idle while `ENABLED=false`.
 
 ```bash
-chmod +x /home/osmc/MeshBoard/scripts/run_wifi_connect_forever.sh
-(crontab -l 2>/dev/null; echo '@reboot APP_DIR=/home/osmc/MeshBoard /home/osmc/MeshBoard/scripts/run_wifi_connect_forever.sh') | crontab -
-nohup /home/osmc/MeshBoard/scripts/run_wifi_connect_forever.sh >/dev/null 2>&1 &
+tail -f ~/MeshBoard/wifi-connect.log
 ```
 
 The helper rereads `wifi_remote.conf` every retry cycle. If `ENABLED=true` and the WiFi interface is offline, it tries to connect to the configured hotspot. Use `INTERFACE=auto` to pick the first WiFi device, or set a specific device such as `wlan0`. If `CONNECT_ONLY_WHEN_OFFLINE=true`, it leaves an already-connected WiFi network alone. Logs go to `wifi-connect.log`.
@@ -212,22 +193,18 @@ On the current OSMC install, that is usually:
 http://192.168.4.100:8080
 ```
 
-Create and enable the admin config:
+The installer creates and enables the admin config. It saves the generated login here:
 
 ```bash
-cd /home/osmc/MeshBoard
-.venv/bin/python admin_server.py --hash-password
-vi admin_config.json
+cat ~/MeshBoard/admin_credentials.txt
 ```
 
-The installer creates `admin_config.json` from `admin_config.json.example` if it does not already exist. Set `enabled` to `true`, keep `username` as `sysop` or change it, paste the generated hash into `password_hash`, and change `session_secret` to any long random text.
-
-Install the admin website at boot:
+To change the admin password later:
 
 ```bash
-chmod +x /home/osmc/MeshBoard/scripts/run_admin_forever.sh
-(crontab -l 2>/dev/null; echo '@reboot APP_DIR=/home/osmc/MeshBoard /home/osmc/MeshBoard/scripts/run_admin_forever.sh') | crontab -
-nohup /home/osmc/MeshBoard/scripts/run_admin_forever.sh >/dev/null 2>&1 &
+cd ~/MeshBoard
+.venv/bin/python admin_server.py --hash-password
+vi admin_config.json
 ```
 
 Admin pages include Users activity, editable AddressBook contacts, Mail messages, Message Board posts, location notes, Events check-ins, and recent logs. Edit/delete/remove/close buttons change `meshboard.db` immediately, so use them like a real SysOp console.
