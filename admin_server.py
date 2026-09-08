@@ -256,6 +256,7 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
             "/addressbook": self.show_addressbook,
             "/edit-addressbook": self.show_edit_addressbook,
             "/messages": self.show_messages,
+            "/message-archives": self.show_message_archives,
             "/edit-message": self.show_edit_message,
             "/board": self.show_board,
             "/edit-board": self.show_edit_board,
@@ -283,6 +284,9 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
             if action == "/delete-message":
                 self.delete_row("messages", data.get("id"))
                 self.redirect("/messages?deleted=1")
+            elif action == "/archive-message":
+                self.archive_message(data.get("id"))
+                self.redirect("/messages?archived=1")
             elif action == "/edit-message":
                 error = self.update_message(data)
                 if error:
@@ -389,7 +393,12 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
                     ).fetchone()["count"],
                     "listed contacts",
                 ),
-                ("/messages", "Mail", conn.execute("SELECT COUNT(*) AS count FROM messages").fetchone()["count"], "stored messages"),
+                (
+                    "/messages",
+                    "Mail",
+                    conn.execute("SELECT COUNT(*) AS count FROM messages WHERE deleted_by_recipient = 0").fetchone()["count"],
+                    "active messages",
+                ),
                 (
                     "/board",
                     "Message Board",
@@ -527,8 +536,42 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
 
     def show_messages(self):
         with db_connect(self.config) as conn:
-            rows = conn.execute("SELECT * FROM messages ORDER BY created_at DESC, id DESC LIMIT 300").fetchall()
-        body = "<table><tr><th>ID</th><th>From</th><th>To</th><th>When</th><th>Body</th><th></th></tr>"
+            rows = conn.execute(
+                """
+                SELECT * FROM messages
+                WHERE deleted_by_recipient = 0
+                ORDER BY created_at DESC, id DESC
+                LIMIT 300
+                """
+            ).fetchall()
+        body = "<p>{}</p>".format(link_button("/message-archives", "Archived Mail"))
+        body += "<table><tr><th>ID</th><th>From</th><th>To</th><th>When</th><th>Body</th><th></th></tr>"
+        for row in rows:
+            edit_path = "/edit-message?" + urlencode({"id": row["id"]})
+            body += (
+                f"<tr><td>{row['id']}</td><td>{esc(row['sender_id'])}</td><td>{esc(row['recipient_id'])}</td>"
+                f"<td>{fmt_time(row['created_at'])}</td><td>{esc(clip(row['body']))}</td>"
+                f"<td>{link_button(edit_path, 'Edit')} "
+                f"{form_button('/archive-message', {'id': row['id']}, 'Archive', False)} "
+                f"{form_button('/delete-message', {'id': row['id']}, 'Delete')}</td></tr>"
+            )
+        if not rows:
+            body += "<tr><td colspan='6'>No active mail messages.</td></tr>"
+        body += "</table>"
+        self.send_html("Mail", body)
+
+    def show_message_archives(self):
+        with db_connect(self.config) as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM messages
+                WHERE deleted_by_recipient = 1
+                ORDER BY created_at DESC, id DESC
+                LIMIT 300
+                """
+            ).fetchall()
+        body = "<p>{}</p>".format(link_button("/messages", "Active Mail"))
+        body += "<table><tr><th>ID</th><th>From</th><th>To</th><th>When</th><th>Body</th><th></th></tr>"
         for row in rows:
             edit_path = "/edit-message?" + urlencode({"id": row["id"]})
             body += (
@@ -536,8 +579,10 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
                 f"<td>{fmt_time(row['created_at'])}</td><td>{esc(clip(row['body']))}</td>"
                 f"<td>{link_button(edit_path, 'Edit')} {form_button('/delete-message', {'id': row['id']}, 'Delete')}</td></tr>"
             )
+        if not rows:
+            body += "<tr><td colspan='6'>No archived mail messages.</td></tr>"
         body += "</table>"
-        self.send_html("Mail", body)
+        self.send_html("Archived Mail", body)
 
     def show_edit_message(self, error="", values=None):
         values = values or {}
@@ -797,6 +842,12 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
             return
         with db_connect(self.config) as conn:
             conn.execute(f"DELETE FROM {table} WHERE id = ?", (row_id,))
+
+    def archive_message(self, row_id):
+        if not row_id:
+            return
+        with db_connect(self.config) as conn:
+            conn.execute("UPDATE messages SET deleted_by_recipient = 1 WHERE id = ?", (row_id,))
 
     def mark_deleted(self, table, row_id):
         if not row_id:

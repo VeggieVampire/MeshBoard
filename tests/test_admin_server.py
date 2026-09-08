@@ -87,6 +87,8 @@ class AdminServerTests(unittest.TestCase):
                     messages = response.read().decode("utf-8")
                 self.assertIn("remove me", messages)
                 self.assertIn("Edit", messages)
+                self.assertIn("Archive", messages)
+                self.assertIn("/message-archives", messages)
 
                 edit_data = urlencode(
                     {"id": str(message_id), "sender_id": "!from", "recipient_id": "!to", "body": "edited body"}
@@ -94,6 +96,20 @@ class AdminServerTests(unittest.TestCase):
                 with opener.open(Request(f"{base}/edit-message", data=edit_data, method="POST")):
                     pass
                 self.assertIn("edited body", Database(db_path).inbox("!to", include_deleted=True)[0]["body"])
+
+                archive_data = urlencode({"id": str(message_id)}).encode("utf-8")
+                with opener.open(Request(f"{base}/archive-message", data=archive_data, method="POST")):
+                    pass
+                self.assertEqual([], Database(db_path).inbox("!to"))
+                self.assertEqual("edited body", Database(db_path).archived_inbox("!to")[0]["body"])
+                with opener.open(f"{base}/messages") as response:
+                    messages = response.read().decode("utf-8")
+                self.assertNotIn("edited body", messages)
+                with opener.open(f"{base}/message-archives") as response:
+                    archived = response.read().decode("utf-8")
+                self.assertIn("Archived Mail", archived)
+                self.assertIn("edited body", archived)
+                self.assertIn("/messages", archived)
 
                 delete_data = urlencode({"id": str(message_id)}).encode("utf-8")
                 with opener.open(Request(f"{base}/delete-message", data=delete_data, method="POST")):
