@@ -38,6 +38,19 @@ def _reset_state(state):
     state.update({"state": "menu", "page": 0})
 
 
+def _suggest_simple_id(user_id):
+    return user_id.lstrip("!")[-4:] or user_id
+
+
+def _validate_simple_id(command_clean):
+    simple_id = command_clean.strip()
+    if len(simple_id) != 4:
+        return None, "Enter exactly 4 characters for your personal ID."
+    if any(char.isspace() for char in simple_id):
+        return None, "Your 4-character ID cannot include spaces."
+    return simple_id, None
+
+
 def _render_inbox(user_id, bbs_system):
     messages = bbs_system.db.inbox(user_id)
     unread = sum(1 for msg in messages if msg["read_at"] is None)
@@ -62,7 +75,9 @@ def _render_message(msg, bbs_system):
         f"Date: {_fmt_date(msg['created_at'], True)}\n"
         f"ID: {msg['id']}\n\n"
         f"{msg['body']}\n\n"
-        "Reply REPLY to answer, ARCHIVE to archive, or BACK for Inbox."
+        "1. Reply\n"
+        "2. Archive\n"
+        "3. Back"
     )
 
 
@@ -135,18 +150,27 @@ def process_command(user_id, command, bbs_system):
 
     if state["state"] == "await_addressbook":
         if command_lower in ("yes", "y"):
-            state["state"] = "await_addressbook_name"
-            return "What simple ID/name should show in AddressBook?"
-        _reset_state(state)
-        return "Not added to AddressBook."
-
-    if state["state"] == "await_addressbook_name":
-        if not command_clean:
-            return "Enter a simple ID/name for AddressBook."
-        simple_id = command_clean[:40]
+            simple_id = _suggest_simple_id(user_id)
+            bbs_system.db.set_mail_listed(user_id, simple_id, True)
+            _reset_state(state)
+            return f"Added to AddressBook as {simple_id}.\n\n{display_menu()}"
+        if command_lower in ("no", "n"):
+            _reset_state(state)
+            return "Not added to AddressBook.\n\n" + display_menu()
+        simple_id, error = _validate_simple_id(command_clean)
+        if error:
+            return error
         bbs_system.db.set_mail_listed(user_id, simple_id, True)
         _reset_state(state)
-        return f"Added to AddressBook as {simple_id}."
+        return f"Added to AddressBook as {simple_id}.\n\n{display_menu()}"
+
+    if state["state"] == "await_addressbook_name":
+        simple_id, error = _validate_simple_id(command_clean)
+        if error:
+            return error
+        bbs_system.db.set_mail_listed(user_id, simple_id, True)
+        _reset_state(state)
+        return f"Added to AddressBook as {simple_id}.\n\n{display_menu()}"
 
     if state["state"] == "send_select":
         recipient = _contact_from_choice(command_clean, state, bbs_system)
@@ -189,14 +213,17 @@ def process_command(user_id, command, bbs_system):
         if not msg or msg["recipient_id"] != user_id:
             state["state"] = "inbox"
             return _render_inbox(user_id, bbs_system)
-        if command_lower == "reply":
+        if command_lower in ("1", "reply"):
             state["recipient_id"] = msg["sender_id"]
             state["state"] = "await_body"
             return f"Reply to {bbs_system.db.display_name_for(msg['sender_id'])}:\nEnter the message body:"
-        if command_lower == "archive":
+        if command_lower in ("2", "archive"):
             bbs_system.db.soft_delete_message(msg["id"], user_id)
             state["state"] = "inbox"
             return "Message archived.\n\n" + _render_inbox(user_id, bbs_system)
+        if command_lower in ("3", "back"):
+            state["state"] = "inbox"
+            return _render_inbox(user_id, bbs_system)
         return _render_message(msg, bbs_system)
 
     if state["state"] == "archive":
@@ -225,7 +252,11 @@ def process_command(user_id, command, bbs_system):
             return _render_contacts(state, bbs_system)
         if command_lower in ("3", "add addressbook", "add address book"):
             state["state"] = "await_addressbook"
-            return "Add you to AddressBook so others can send you mail? Reply YES or NO."
+            simple_id = _suggest_simple_id(user_id)
+            return (
+                "Add you to AddressBook so others can send you mail?\n"
+                f"Reply YES for {simple_id}, NO to cancel, or send any 4-character ID."
+            )
         if command_lower in ("4", "archive"):
             state["state"] = "archive"
             return _render_archive(user_id, bbs_system)

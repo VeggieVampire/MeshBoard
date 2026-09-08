@@ -12,6 +12,8 @@ from location_service import distance_between_locations
 from modules.Location import process_command as location_command
 from modules import Mail
 from modules.Games import escape_room, hot_cold, tic_tac_toe, zork
+from modules import MessageBoard
+from modules import WhosBeenHere
 
 
 class DummyInterface:
@@ -184,17 +186,26 @@ class MeshBoardTests(unittest.TestCase):
         self.assertIn("4. Archive", menu)
 
         self.assertIn("Add you", Mail.process_command(user, "add addressBook", self.bbs))
-        self.assertIn("simple ID", Mail.process_command(user, "yes", self.bbs))
-        self.assertEqual("Added to AddressBook as Sender.", Mail.process_command(user, "Sender", self.bbs))
+        self.assertIn("Added to AddressBook as nder", Mail.process_command(user, "yes", self.bbs))
 
         for index in range(9):
             self.bbs.db.set_mail_listed(f"!node{index}", f"User{index}", True)
 
         response = Mail.process_command(user, "send", self.bbs)
-        self.assertIn("1. Sender", response)
+        self.assertIn("1. nder", response)
         self.assertIn("9. Next", response)
         response = Mail.process_command(user, "9", self.bbs)
         self.assertIn("AddressBook 9-10", response)
+
+    def test_mail_addressbook_custom_simple_id(self):
+        user = "!sender"
+        self.bbs.users[user] = {"menu": ["main"]}
+
+        Mail.process_command(user, "add addressBook", self.bbs)
+        response = Mail.process_command(user, "HOME", self.bbs)
+
+        self.assertIn("Added to AddressBook as HOME", response)
+        self.assertEqual("HOME", self.bbs.db.list_mail_contacts()[0]["display_name"])
 
     def test_mail_inbox_archive_and_reply(self):
         sender = "!sender"
@@ -208,10 +219,13 @@ class MeshBoardTests(unittest.TestCase):
         self.assertIn("Sender", inbox)
 
         detail = Mail.process_command(recipient, "1", self.bbs)
-        self.assertIn("Reply REPLY", detail)
+        self.assertIn("From: Sender", detail)
+        self.assertIn("1. Reply", detail)
+        self.assertIn("2. Archive", detail)
+        self.assertIn("3. Back", detail)
         self.assertEqual(0, self.bbs.db.unread_count(recipient))
 
-        reply_prompt = Mail.process_command(recipient, "reply", self.bbs)
+        reply_prompt = Mail.process_command(recipient, "1", self.bbs)
         self.assertIn("Reply to Sender", reply_prompt)
         sent = Mail.process_command(recipient, "Thanks", self.bbs)
         self.assertIn("Message saved for Sender", sent)
@@ -219,7 +233,7 @@ class MeshBoardTests(unittest.TestCase):
 
         Mail.process_command(recipient, "inbox", self.bbs)
         Mail.process_command(recipient, "1", self.bbs)
-        archived = Mail.process_command(recipient, "archive", self.bbs)
+        archived = Mail.process_command(recipient, "2", self.bbs)
         self.assertIn("Message archived", archived)
         self.assertEqual([], self.bbs.db.inbox(recipient))
 
@@ -242,6 +256,8 @@ class MeshBoardTests(unittest.TestCase):
             self.bbs.display_menu("!abc12345"),
             self.bbs.display_submenu("Games"),
             Mail.display_menu(),
+            WhosBeenHere.display_menu(),
+            MessageBoard.display_menu(),
             escape_room.display_menu(),
             hot_cold.display_menu(),
             tic_tac_toe.display_menu(),
@@ -274,7 +290,77 @@ class MeshBoardTests(unittest.TestCase):
         self.assertIn("Mail", self.bbs.handle_message(user, "back"))
         self.assertIn("Add you", self.bbs.handle_message(user, "3"))
         self.assertIn("Not added", self.bbs.handle_message(user, "no"))
+        self.assertIn("Add you", self.bbs.handle_message(user, "3"))
+        self.assertIn("Added to AddressBook", self.bbs.handle_message(user, "yes"))
         self.assertIn("Archive", self.bbs.handle_message(user, "4"))
+
+    def test_whos_been_here_lists_recent_users_newest_first(self):
+        now = int(time.time())
+        self.bbs.db.set_mail_listed("!old", "LAKE", True)
+        self.bbs.db.upsert_user("!old", seen_at=now - 3 * 86400)
+        self.bbs.db.set_mail_listed("!new", "CABN", True)
+        self.bbs.db.upsert_user("!new", seen_at=now)
+
+        self.bbs.users["!viewer"] = {"menu": ["main"]}
+        response = self.bbs.handle_message("!viewer", "4")
+
+        self.assertLess(response.index("CABN"), response.index("LAKE"))
+        self.assertIn("Seen: Today", response)
+        self.assertIn("Seen: 3 days ago", response)
+
+    def test_message_board_category_post_and_read(self):
+        user = "!poster"
+        self.bbs.db.set_mail_listed(user, "POST", True)
+
+        menu = MessageBoard.display_menu()
+        self.assertIn("1. General Discussion", menu)
+        self.assertIn("6. Main Menu Header", menu)
+
+        category = MessageBoard.process_command(user, "1", self.bbs)
+        self.assertIn("General Discussion", category)
+        self.assertIn("POST to add", category)
+
+        prompt = MessageBoard.process_command(user, "POST", self.bbs)
+        self.assertIn("New post", prompt)
+        posted = MessageBoard.process_command(user, "Trail is clear.", self.bbs)
+        self.assertIn("Posted", posted)
+        self.assertIn("POST", posted)
+        self.assertIn("Trail is clear.", posted)
+
+        detail = MessageBoard.process_command(user, "1", self.bbs)
+        self.assertIn("From: POST", detail)
+        self.assertIn("Trail is clear.", detail)
+        self.assertIn("3. Back", detail)
+
+    def test_events_checkin_tracks_addressbook_contacts(self):
+        self.bbs.db.set_mail_listed("!cabn", "CABN", True)
+        self.bbs.db.set_mail_listed("!lake", "LAKE", True)
+        self.bbs.users["!cabn"] = {"menu": ["main"]}
+
+        self.bbs.handle_message("!cabn", "5")
+        events = self.bbs.handle_message("!cabn", "4")
+        self.assertIn("No active check-in", events)
+
+        started = self.bbs.handle_message("!cabn", "1")
+
+        self.assertIn("Check-in started for 24 hours", started)
+        self.assertIn("In: CABN", started)
+        self.assertIn("Out: LAKE", started)
+
+        self.bbs.users["!lake"] = {"menu": ["main", "Message Board"], "module_control": MessageBoard}
+        MessageBoard.process_command("!lake", "4", self.bbs)
+        checked = MessageBoard.process_command("!lake", "1", self.bbs)
+
+        self.assertIn("Checked in", checked)
+        self.assertIn("In: CABN, LAKE", checked)
+        self.assertIn("Out: None", checked)
+
+    def test_events_checkin_expires_after_24_hours(self):
+        event_id = self.bbs.db.create_checkin_event("!net", starts_at=1000, duration_seconds=86400)
+        self.bbs.db.check_in(event_id, "!net", checked_in_at=1000)
+
+        self.assertIsNotNone(self.bbs.db.active_checkin_event(now=1000 + 86399))
+        self.assertIsNone(self.bbs.db.active_checkin_event(now=1000 + 86400))
 
     def test_broadcast_text_is_ignored(self):
         mesh_interface = Interface(test_config(self.db_path))

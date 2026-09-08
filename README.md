@@ -11,6 +11,10 @@ MeshBoard also keeps the attached radio clock sane. On startup it sets the Mesht
 - Direct-message-only BBS commands. Broadcast text packets are ignored.
 - Menu navigation with `top`, `cd ..`, and numbered choices.
 - Persistent SQLite store-and-forward mail keyed by Meshtastic node ID.
+- AddressBook opt-in with user-chosen 4-character IDs.
+- Who's Been Here list showing recent MeshBoard users, newest first.
+- Message Board categories for general discussion, local news, trading, events, rumors, and a short header channel.
+- Events check-in board with a 24-hour HAM-style roster from AddressBook.
 - Live GPS-aware Location tools using the sender node's latest Meshtastic position.
 - Saved location notes, nearby note lookup, and Hot Cold GPS gameplay.
 - USB serial first, with WiFi/TCP and Bluetooth/BLE fallback.
@@ -24,8 +28,10 @@ MeshBoard also keeps the attached radio clock sane. On startup it sets the Mesht
 - `bbs_system.py` owns per-node sessions, dynamic module loading, unread mail notices, and latest in-memory GPS state.
 - `database.py` initializes and accesses `meshboard.db`.
 - `location_service.py` contains GPS freshness and Haversine helpers.
-- `modules/Mail/` provides inbox, send, sent mail, address list, and archive flows.
-- `modules/Location/` provides What's Here, Leave Something Here, Nearby, My Saved Locations, and Hot Cold access.
+- `modules/Mail/` provides inbox, send, AddressBook opt-in, reply, and archive flows.
+- `modules/MessageBoard/` provides public board categories and Events check-ins.
+- `modules/WhosBeenHere/` lists recent users by last interaction time.
+- `modules/Location/` provides What's Here, Drop Note, and Nearby Notes.
 - `modules/Games/` remains dynamically loaded as the Games submenu.
 
 ## Install On A Pi Or OSMC Host
@@ -228,23 +234,37 @@ Main Menu:
 1. Location
 2. Games
 3. Mail
-Choose an option (e.g., '1').
-'top' to go to Main Menu, 'cd ..' to go back one menu.
+4. Who's Been Here
+5. Message Board
+Reply number. top - Main, cd .. - Back
 ```
 
 Common commands:
 
 - `top`: return to the main menu.
-- `cd ..`: go back one menu.
-- `1`, `2`, `3`: choose menu items.
-- `NAME Alice`: set your display name for Mail/address lists.
+- `cd ..`, `cd..`, `Cd ..`, or `Cd..`: go back one menu.
+- `1`, `2`, `3`, etc.: choose menu items.
 
 Mail:
 
 - Open `Mail` from the main menu.
-- Use Inbox to read stored messages.
-- Use Send Message to send a stored message to another node ID.
+- Use Inbox to read stored messages. Message detail uses `1. Reply`, `2. Archive`, and `3. Back`.
+- Use Send to choose an AddressBook contact and send a stored message.
+- Use Add AddressBook to make yourself selectable by others. Reply `YES` for the default 4-character ID, `NO` to cancel, or send any custom 4-character ID.
 - Messages persist in `meshboard.db`.
+
+Who's Been Here:
+
+- Shows users who have interacted with MeshBoard, newest first.
+- Uses the AddressBook/display name when available, otherwise the Meshtastic node ID.
+
+Message Board:
+
+- Open `Message Board` from the main menu.
+- Categories are General Discussion, Local News, Buy / Sell / Trade, Events, Rumors & Gossip, and Main Menu Header.
+- In most categories, use `POST` to add a post, a number to read a post, `Next` for another page, and `BACK` to return.
+- In Events, `1` starts or joins the active 24-hour check-in, `2` refreshes the check-in roster, and `3` opens normal Event posts.
+- The Events check-in roster is based on AddressBook users and shows who is `In` and who is still `Out`.
 
 Location:
 
@@ -282,7 +302,7 @@ The Windows node was reflashed, had `lora.region` corrected to `US`, and fresh c
 - If "Last Heard" is unknown, wait for NodeInfo or add a contact URL. Direct DM can work before Last Heard is populated.
 - If direct DM returns `NO_CHANNEL`, refresh contacts on both radios and confirm matching channel, region, and modem preset.
 - If USB is busy, close the Meshtastic web client before running CLI commands against the same COM port.
-- If MeshBoard is not responding, check `systemctl --user status meshboard.service` and `tail -f listener.log`.
+- If MeshBoard is not responding, check `tail -f listener.log` and either `systemctl --user status meshboard.service` or the no-sudo cron launcher process.
 
 ## Manual Run
 
@@ -308,6 +328,9 @@ python -m unittest discover -s tests
 - `address_book(owner_id, node_id, display_name, created_at, updated_at)`
 - `messages(id, sender_id, recipient_id, body, created_at, read_at, deleted_by_sender, deleted_by_recipient)`
 - `locations(id, creator_id, creator_name, latitude, longitude, altitude, body, created_at, updated_at, deleted, visibility)`
+- `board_posts(id, category, author_id, body, created_at, deleted)`
+- `checkin_events(id, title, created_by, starts_at, ends_at, closed)`
+- `checkin_entries(event_id, node_id, checked_in_at)`
 
 ## Manual Mail Test With Two Nodes
 

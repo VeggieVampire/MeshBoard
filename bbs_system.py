@@ -8,7 +8,7 @@ from interface import Interface
 from location_service import location_age, stale_location_message
 
 
-MAIN_MENU_ORDER = ("Location", "Games", "Mail")
+MAIN_MENU_ORDER = ("Location", "Games", "Mail", "Who's Been Here", "Message Board")
 GAMES_MENU_ORDER = ("Hot Cold", "ZORK", "Tic Tac Toe", "Escape Room")
 
 
@@ -234,6 +234,8 @@ class BBSSystem:
                 else:
                     module = self.menu_modules[selected_menu]
                     self.users[user_id]["module_control"] = module
+                    if hasattr(module, "enter_menu"):
+                        return module.enter_menu(user_id, self)
                     return module.display_menu() if hasattr(module, "display_menu") else "No menu available."
             else:
                 return "Invalid option."
@@ -250,6 +252,8 @@ class BBSSystem:
             if 0 <= command_index < len(submenu_names):
                 selected_submodule = submodules[submenu_names[command_index]]
                 self.users[user_id]["module_control"] = selected_submodule  # Assign control to the submodule
+                if hasattr(selected_submodule, "enter_menu"):
+                    return selected_submodule.enter_menu(user_id, self)
                 return selected_submodule.display_menu() if hasattr(selected_submodule, "display_menu") else "No menu available."
             else:
                 return "Invalid option."
@@ -269,8 +273,7 @@ class BBSSystem:
                 menu_text = f"Welcome back.\nYou have {unread} unread message{'s' if unread != 1 else ''}.\n\n" + menu_text
             for index, menu_name in enumerate(self.menu_modules.keys(), start=1):
                 menu_text += f"{index}. {menu_name}\n"
-            menu_text += "Choose an option (e.g., '1').\n"
-            menu_text += "'top' to go to Main Menu, 'cd ..' to go back one menu."
+            menu_text += "Reply number. top - Main, cd .. - Back"
             return menu_text
         elif (
             current_menu in self.menu_modules

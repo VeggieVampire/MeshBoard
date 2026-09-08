@@ -67,6 +67,32 @@ class Database:
                     deleted INTEGER NOT NULL DEFAULT 0,
                     visibility TEXT NOT NULL DEFAULT 'public'
                 );
+
+                CREATE TABLE IF NOT EXISTS board_posts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    category TEXT NOT NULL,
+                    author_id TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    deleted INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE IF NOT EXISTS checkin_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    created_by TEXT NOT NULL,
+                    starts_at INTEGER NOT NULL,
+                    ends_at INTEGER NOT NULL,
+                    closed INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE IF NOT EXISTS checkin_entries (
+                    event_id INTEGER NOT NULL,
+                    node_id TEXT NOT NULL,
+                    checked_in_at INTEGER NOT NULL,
+                    PRIMARY KEY (event_id, node_id),
+                    FOREIGN KEY (event_id) REFERENCES checkin_events(id)
+                );
                 """
             )
             columns = {
@@ -101,6 +127,17 @@ class Database:
         with self.connect() as conn:
             return conn.execute(
                 "SELECT * FROM users ORDER BY COALESCE(display_name, node_id) COLLATE NOCASE"
+            ).fetchall()
+
+    def recently_seen_users(self, limit=8, offset=0):
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT * FROM users
+                ORDER BY last_seen DESC, COALESCE(display_name, node_id) COLLATE NOCASE
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
             ).fetchall()
 
     def set_display_name(self, node_id, display_name):
@@ -224,6 +261,90 @@ class Database:
                 (message_id, user_id),
             )
             return cursor.rowcount > 0
+
+    def create_board_post(self, category, author_id, body, created_at=None):
+        created_at = int(created_at or time.time())
+        self.upsert_user(author_id, seen_at=created_at)
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO board_posts (category, author_id, body, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (category, author_id, body, created_at),
+            )
+            return cursor.lastrowid
+
+    def board_posts(self, category, limit=8, offset=0):
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT * FROM board_posts
+                WHERE category = ? AND deleted = 0
+                ORDER BY created_at DESC, id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (category, limit, offset),
+            ).fetchall()
+
+    def get_board_post(self, post_id):
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT * FROM board_posts WHERE id = ? AND deleted = 0",
+                (post_id,),
+            ).fetchone()
+
+    def active_checkin_event(self, now=None):
+        now = int(now or time.time())
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT * FROM checkin_events
+                WHERE closed = 0 AND starts_at <= ? AND ends_at > ?
+                ORDER BY starts_at DESC, id DESC
+                LIMIT 1
+                """,
+                (now, now),
+            ).fetchone()
+
+    def create_checkin_event(self, created_by, title=None, starts_at=None, duration_seconds=86400):
+        starts_at = int(starts_at or time.time())
+        title = title or time.strftime("Check-In %b %d", time.localtime(starts_at))
+        self.upsert_user(created_by, seen_at=starts_at)
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO checkin_events (title, created_by, starts_at, ends_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (title, created_by, starts_at, starts_at + int(duration_seconds)),
+            )
+            return cursor.lastrowid
+
+    def check_in(self, event_id, node_id, checked_in_at=None):
+        checked_in_at = int(checked_in_at or time.time())
+        self.upsert_user(node_id, seen_at=checked_in_at)
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO checkin_entries (event_id, node_id, checked_in_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(event_id, node_id) DO UPDATE SET
+                    checked_in_at = excluded.checked_in_at
+                """,
+                (event_id, node_id, checked_in_at),
+            )
+
+    def checkin_entries(self, event_id):
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT * FROM checkin_entries
+                WHERE event_id = ?
+                ORDER BY checked_in_at DESC, node_id
+                """,
+                (event_id,),
+            ).fetchall()
 
     def save_location(self, creator_id, creator_name, latitude, longitude, altitude, body, visibility="public"):
         now = int(time.time())
