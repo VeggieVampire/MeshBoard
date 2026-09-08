@@ -8,7 +8,7 @@ from interface import Interface
 from location_service import location_age, stale_location_message
 
 
-MAIN_MENU_ORDER = ("Location", "Games", "Mail", "Who's Been Here", "Message Board")
+MAIN_MENU_ORDER = ("Location", "Games", "Mail", "Who's Been Here", "Message Board", "Check-Ins")
 GAMES_MENU_ORDER = ("Hot Cold", "ZORK", "Tic Tac Toe", "Escape Room")
 
 

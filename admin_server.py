@@ -719,11 +719,11 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
             rows = conn.execute(
                 "SELECT * FROM locations WHERE deleted = 0 ORDER BY created_at DESC, id DESC LIMIT 300"
             ).fetchall()
-        body = "<table><tr><th>ID</th><th>Creator</th><th>When</th><th>Lat/Lon</th><th>Body</th><th></th></tr>"
+        body = "<table><tr><th>ID</th><th>Kind</th><th>Creator</th><th>When</th><th>Lat/Lon</th><th>Body</th><th></th></tr>"
         for row in rows:
             edit_path = "/edit-location?" + urlencode({"id": row["id"]})
             body += (
-                f"<tr><td>{row['id']}</td><td>{esc(row['creator_name'] or row['creator_id'])}</td>"
+                f"<tr><td>{row['id']}</td><td>{esc(row['kind'])}</td><td>{esc(row['creator_name'] or row['creator_id'])}</td>"
                 f"<td>{fmt_time(row['created_at'])}</td><td>{row['latitude']:.6f}, {row['longitude']:.6f}</td>"
                 f"<td>{esc(clip(row['body']))}</td>"
                 f"<td>{link_button(edit_path, 'Edit')} {form_button('/delete-location', {'id': row['id']}, 'Delete')}</td></tr>"
@@ -745,12 +745,15 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
         longitude = values.get("longitude", row["longitude"])
         altitude = values.get("altitude", "" if row["altitude"] is None else row["altitude"])
         visibility = values.get("visibility", row["visibility"])
+        kind = values.get("kind", row["kind"])
         body_text = values.get("body", row["body"])
         body = "<div class='card'><h2>Edit Location</h2>"
         if error:
             body += f"<p class='flash'>{esc(error)}</p>"
         public_selected = " selected" if visibility == "public" else ""
         private_selected = " selected" if visibility == "private" else ""
+        note_selected = " selected" if kind == "note" else ""
+        checkin_selected = " selected" if kind == "checkin" else ""
         body += (
             "<form method='post' action='/edit-location'>"
             f"<input type='hidden' name='id' value='{row['id']}'>"
@@ -766,6 +769,8 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
             f"<input name='altitude' value='{esc(altitude)}'>"
             "<label>Visibility</label>"
             f"<select name='visibility'><option value='public'{public_selected}>public</option><option value='private'{private_selected}>private</option></select>"
+            "<label>Kind</label>"
+            f"<select name='kind'><option value='note'{note_selected}>note</option><option value='checkin'{checkin_selected}>checkin</option></select>"
             "<label>Body</label>"
             f"<textarea name='body'>{esc(body_text)}</textarea>"
             "<button>Save</button> "
@@ -942,12 +947,15 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
         creator_name = (data.get("creator_name") or "").strip() or None
         body = (data.get("body") or "").strip()
         visibility = (data.get("visibility") or "public").strip()
+        kind = (data.get("kind") or "note").strip()
         if not row_id:
             return "Missing location ID."
         if not creator_id:
             return "Creator node is required."
         if visibility not in ("public", "private"):
             return "Visibility must be public or private."
+        if kind not in ("note", "checkin"):
+            return "Kind must be note or checkin."
         try:
             latitude = float(data.get("latitude"))
             longitude = float(data.get("longitude"))
@@ -962,10 +970,10 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
                 """
                 UPDATE locations
                 SET creator_id = ?, creator_name = ?, latitude = ?, longitude = ?,
-                    altitude = ?, body = ?, updated_at = ?, visibility = ?
+                    altitude = ?, body = ?, updated_at = ?, visibility = ?, kind = ?
                 WHERE id = ? AND deleted = 0
                 """,
-                (creator_id, creator_name, latitude, longitude, altitude, body, int(time.time()), visibility, row_id),
+                (creator_id, creator_name, latitude, longitude, altitude, body, int(time.time()), visibility, kind, row_id),
             )
         if cursor.rowcount == 0:
             return "Location not found."

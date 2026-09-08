@@ -14,6 +14,7 @@ from modules import Mail
 from modules.Games import escape_room, hot_cold, tic_tac_toe, zork
 from modules import MessageBoard
 from modules import WhosBeenHere
+from modules import CheckIns
 
 
 class DummyInterface:
@@ -91,8 +92,49 @@ class MeshBoardTests(unittest.TestCase):
         self.assertIn("1. What's Here?", menu)
         self.assertIn("2. Drop Note", menu)
         self.assertIn("3. Nearby Notes", menu)
+        self.assertIn("4. Check In", menu)
         self.assertNotIn("My Saved", menu)
         self.assertNotIn("Hot Cold", menu)
+
+    def test_location_checkin_shows_in_locations_and_checkins(self):
+        user = "!abc12345"
+        self.bbs.db.set_mail_listed(user, "CABN", True)
+        self.bbs.update_node_location(user, {"latitude": 35.0, "longitude": -97.0, "altitude": 300})
+        self.bbs.users[user] = {"menu": ["main"]}
+
+        prompt = location_command(user, "4", self.bbs)
+        self.assertIn("Send a comment", prompt)
+        checked = location_command(user, "Very cool", self.bbs)
+        self.assertIn("Checked in at your current location", checked)
+
+        locations = self.bbs.db.active_locations()
+        self.assertEqual(1, len(locations))
+        self.assertEqual("checkin", locations[0]["kind"])
+        self.assertIn("Very cool", locations[0]["body"])
+
+        here = location_command(user, "1", self.bbs)
+        self.assertIn("Check-in", here)
+        self.assertIn("Very cool", here)
+
+        checkins = CheckIns.enter_menu(user, self.bbs)
+        self.assertIn("Recent Location Check-Ins", checkins)
+        self.assertIn("CABN", checkins)
+        self.assertIn("Very cool", checkins)
+
+        main_menu_checkins = self.bbs.handle_message(user, "6")
+        self.assertIn("Recent Location Check-Ins", main_menu_checkins)
+        self.assertIn("Very cool", main_menu_checkins)
+
+    def test_location_checkin_without_comment_is_allowed(self):
+        user = "!skip1234"
+        self.bbs.update_node_location(user, {"latitude": 35.0, "longitude": -97.0})
+        self.bbs.users[user] = {"menu": ["main"]}
+
+        location_command(user, "4", self.bbs)
+        checked = location_command(user, "skip", self.bbs)
+
+        self.assertIn("Checked in at your current location", checked)
+        self.assertEqual("Checked in here.", self.bbs.db.location_checkins()[0]["body"])
 
     def test_whats_here_radius_and_nearby_sorting(self):
         user = "!abc12345"
@@ -350,6 +392,7 @@ class MeshBoardTests(unittest.TestCase):
             Mail.display_menu(),
             WhosBeenHere.display_menu(),
             MessageBoard.display_menu(),
+            CheckIns.display_menu(),
             escape_room.display_menu(),
             hot_cold.display_menu(),
             tic_tac_toe.display_menu(),

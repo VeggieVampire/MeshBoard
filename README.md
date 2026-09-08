@@ -15,6 +15,7 @@ MeshBoard also keeps the attached radio clock sane. On startup it sets the Mesht
 - Who's Been Here list showing automatic recent MeshBoard users, newest first, with command counts.
 - Message Board categories for general discussion, local news, trading, events, and rumors.
 - Events check-in board with a 24-hour HAM-style roster from AddressBook.
+- Location check-ins with optional comments that also appear in nearby location results.
 - Local SysOp admin website for viewing and deleting database content from the LAN or hotspot.
 - Live GPS-aware Location tools using the sender node's latest Meshtastic position.
 - Saved location notes, nearby note lookup, and Hot Cold GPS gameplay.
@@ -32,8 +33,9 @@ MeshBoard also keeps the attached radio clock sane. On startup it sets the Mesht
 - `location_service.py` contains GPS freshness and Haversine helpers.
 - `modules/Mail/` provides private inbox, send, AddressBook opt-in, reply, archive, and send-to-all flows.
 - `modules/MessageBoard/` provides public board categories and Events check-ins.
+- `modules/CheckIns/` lists recent location check-ins from the main menu.
 - `modules/WhosBeenHere/` lists automatic recent users by last interaction time and command count.
-- `modules/Location/` provides What's Here, Drop Note, and Nearby Notes.
+- `modules/Location/` provides What's Here, Drop Note, Nearby Notes, and location check-ins.
 - `modules/Games/` remains dynamically loaded as the Games submenu.
 
 ## Install On A Pi Or OSMC Host
@@ -293,6 +295,7 @@ Main Menu:
 3. Mail
 4. Who's Been Here
 5. Message Board
+6. Check-Ins
 Reply number. top - Main, cd .. - Back
 ```
 
@@ -331,9 +334,15 @@ Location:
 
 - Requires the sender's node to provide GPS/position packets.
 - What's Here shows saved notes near your current node position.
-- Leave Something Here saves a note at your current node position.
-- Nearby lists saved notes sorted by distance.
+- Drop Note saves a note at your current node position.
+- Nearby lists saved notes and location check-ins sorted by distance.
+- Check In saves your current node position with an optional comment. It appears in What's Here, Nearby, and the main-menu Check-Ins view.
 - Hot Cold uses your latest live GPS position.
+
+Check-Ins:
+
+- Shows recent location check-ins from the main menu.
+- This is separate from Events check-ins. Events check-ins are the HAM-style 24-hour roster under Message Board > Events and do not require GPS.
 
 ## What Was Tested
 
@@ -388,7 +397,7 @@ python -m unittest discover -s tests
 - `users(node_id, display_name, mail_listed, first_seen, last_seen, command_count, last_mail_check_at)`
 - `address_book(owner_id, node_id, display_name, created_at, updated_at)`
 - `messages(id, sender_id, recipient_id, body, created_at, read_at, deleted_by_sender, deleted_by_recipient)`
-- `locations(id, creator_id, creator_name, latitude, longitude, altitude, body, created_at, updated_at, deleted, visibility)`
+- `locations(id, creator_id, creator_name, latitude, longitude, altitude, body, created_at, updated_at, deleted, visibility, kind)`
 - `board_posts(id, category, author_id, body, created_at, deleted)`
 - `checkin_events(id, title, created_by, starts_at, ends_at, closed)`
 - `checkin_entries(event_id, node_id, checked_in_at)`

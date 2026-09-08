@@ -67,7 +67,8 @@ class Database:
                     created_at INTEGER NOT NULL,
                     updated_at INTEGER NOT NULL,
                     deleted INTEGER NOT NULL DEFAULT 0,
-                    visibility TEXT NOT NULL DEFAULT 'public'
+                    visibility TEXT NOT NULL DEFAULT 'public',
+                    kind TEXT NOT NULL DEFAULT 'note'
                 );
 
                 CREATE TABLE IF NOT EXISTS board_posts (
@@ -107,6 +108,12 @@ class Database:
                 conn.execute("ALTER TABLE users ADD COLUMN command_count INTEGER NOT NULL DEFAULT 0")
             if "last_mail_check_at" not in columns:
                 conn.execute("ALTER TABLE users ADD COLUMN last_mail_check_at INTEGER")
+            location_columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(locations)").fetchall()
+            }
+            if "kind" not in location_columns:
+                conn.execute("ALTER TABLE locations ADD COLUMN kind TEXT NOT NULL DEFAULT 'note'")
 
     def upsert_user(self, node_id, display_name=None, seen_at=None):
         seen_at = int(seen_at or time.time())
@@ -379,16 +386,16 @@ class Database:
                 (event_id,),
             ).fetchall()
 
-    def save_location(self, creator_id, creator_name, latitude, longitude, altitude, body, visibility="public"):
+    def save_location(self, creator_id, creator_name, latitude, longitude, altitude, body, visibility="public", kind="note"):
         now = int(time.time())
         with self.connect() as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO locations
-                    (creator_id, creator_name, latitude, longitude, altitude, body, created_at, updated_at, visibility)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (creator_id, creator_name, latitude, longitude, altitude, body, created_at, updated_at, visibility, kind)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (creator_id, creator_name, latitude, longitude, altitude, body, now, now, visibility),
+                (creator_id, creator_name, latitude, longitude, altitude, body, now, now, visibility, kind),
             )
             return cursor.lastrowid
 
@@ -400,6 +407,18 @@ class Database:
                 WHERE deleted = 0 AND visibility = 'public'
                 ORDER BY created_at DESC, id DESC
                 """
+            ).fetchall()
+
+    def location_checkins(self, limit=20):
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT * FROM locations
+                WHERE deleted = 0 AND visibility = 'public' AND kind = 'checkin'
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                (limit,),
             ).fetchall()
 
     def locations_by_creator(self, creator_id):
