@@ -231,7 +231,7 @@ chmod +x /home/osmc/MeshBoard/scripts/run_admin_forever.sh
 nohup /home/osmc/MeshBoard/scripts/run_admin_forever.sh >/dev/null 2>&1 &
 ```
 
-Admin pages include users, AddressBook contacts, Mail messages, Message Board posts, location notes, check-ins, and recent logs. Delete/remove/close buttons change `meshboard.db` immediately, so use them like a real SysOp console.
+Admin pages include users, editable AddressBook contacts, Mail messages, Message Board posts, location notes, check-ins, and recent logs. Delete/remove/close buttons change `meshboard.db` immediately, so use them like a real SysOp console.
 
 The admin launcher watches for a usable IPv4 address before starting the website. If the Pi has no LAN or hotspot IP, the web server stays down and only the small launcher loop remains. If the IP disappears later, the launcher stops the website until an IP comes back. To change the check interval, set `ADMIN_IP_CHECK_INTERVAL_SECONDS` before running `scripts/run_admin_forever.sh`.
 

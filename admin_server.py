@@ -104,6 +104,10 @@ def form_button(action, fields, label, danger=True):
     return f'<form method="post" action="{action}" class="inline">{hidden}<button class="{klass}">{esc(label)}</button></form>'
 
 
+def link_button(path, label):
+    return f'<a class="button" href="{esc(path)}">{esc(label)}</a>'
+
+
 class AdminHandler(BaseHTTPRequestHandler):
     server_version = "MeshBoardAdmin/1.0"
 
@@ -241,6 +245,7 @@ input {{ width: 100%; box-sizing: border-box; padding: 10px; margin: 6px 0 12px;
             "/": self.show_dashboard,
             "/users": self.show_users,
             "/addressbook": self.show_addressbook,
+            "/edit-addressbook": self.show_edit_addressbook,
             "/messages": self.show_messages,
             "/board": self.show_board,
             "/locations": self.show_locations,
@@ -280,6 +285,12 @@ input {{ width: 100%; box-sizing: border-box; padding: 10px; margin: 6px 0 12px;
             elif action == "/remove-addressbook":
                 self.set_addressbook_listed(data.get("node_id"), False)
                 self.redirect("/addressbook?removed=1")
+            elif action == "/edit-addressbook":
+                error = self.update_addressbook_id(data.get("node_id"), data.get("display_name"))
+                if error:
+                    self.show_edit_addressbook(error, data.get("node_id"), data.get("display_name"))
+                else:
+                    self.redirect("/addressbook?edited=1")
             elif action == "/close-checkin":
                 self.close_checkin(data.get("id"))
                 self.redirect("/checkins?closed=1")
@@ -361,15 +372,47 @@ input {{ width: 100%; box-sizing: border-box; padding: 10px; margin: 6px 0 12px;
             ).fetchall()
         body = "<table><tr><th>ID</th><th>Node</th><th>First Seen</th><th>Last Seen</th><th></th></tr>"
         for row in rows:
+            edit_path = "/edit-addressbook?" + urlencode({"node_id": row["node_id"]})
             body += (
                 f"<tr><td>{esc(row['display_name'])}</td><td>{esc(row['node_id'])}</td>"
                 f"<td>{fmt_time(row['first_seen'])}</td><td>{fmt_time(row['last_seen'])}</td>"
-                f"<td>{form_button('/remove-addressbook', {'node_id': row['node_id']}, 'Remove')}</td></tr>"
+                f"<td>{link_button(edit_path, 'Edit')} {form_button('/remove-addressbook', {'node_id': row['node_id']}, 'Remove')}</td></tr>"
             )
         if not rows:
             body += "<tr><td colspan='5'>AddressBook is empty.</td></tr>"
         body += "</table>"
         self.send_html("AddressBook", body)
+
+    def show_edit_addressbook(self, error="", node_id="", display_name=""):
+        node_id = node_id or self.query_value("node_id")
+        with db_connect(self.config) as conn:
+            row = conn.execute(
+                """
+                SELECT node_id, display_name
+                FROM users
+                WHERE node_id = ? AND mail_listed = 1
+                """,
+                (node_id,),
+            ).fetchone()
+        if not row:
+            self.send_html("AddressBook", "<p>AddressBook contact not found.</p><p><a class='button' href='/addressbook'>Back</a></p>", 404)
+            return
+        display_name = display_name if display_name is not None else row["display_name"]
+        display_name = display_name or row["display_name"]
+        body = "<div class='card'><h2>Edit AddressBook ID</h2>"
+        if error:
+            body += f"<p class='flash'>{esc(error)}</p>"
+        body += (
+            "<form method='post' action='/edit-addressbook'>"
+            f"<input type='hidden' name='node_id' value='{esc(row['node_id'])}'>"
+            f"<p class='muted'>{esc(row['node_id'])}</p>"
+            "<label>4-character ID</label>"
+            f"<input name='display_name' maxlength='4' value='{esc(display_name)}' autofocus>"
+            "<button>Save</button> "
+            "<a class='button' href='/addressbook'>Cancel</a>"
+            "</form></div>"
+        )
+        self.send_html("Edit AddressBook", body)
 
     def show_messages(self):
         with db_connect(self.config) as conn:
@@ -515,6 +558,27 @@ input {{ width: 100%; box-sizing: border-box; padding: 10px; margin: 6px 0 12px;
             return
         with db_connect(self.config) as conn:
             conn.execute("UPDATE users SET mail_listed = ? WHERE node_id = ?", (1 if listed else 0, node_id))
+
+    def update_addressbook_id(self, node_id, display_name):
+        display_name = (display_name or "").strip()
+        if not node_id:
+            return "Missing node ID."
+        if len(display_name) != 4:
+            return "AddressBook ID must be exactly 4 characters."
+        if any(char.isspace() for char in display_name):
+            return "AddressBook ID cannot include spaces."
+        with db_connect(self.config) as conn:
+            cursor = conn.execute(
+                """
+                UPDATE users
+                SET display_name = ?, mail_listed = 1
+                WHERE node_id = ?
+                """,
+                (display_name, node_id),
+            )
+        if cursor.rowcount == 0:
+            return "AddressBook contact not found."
+        return ""
 
     def close_checkin(self, event_id):
         if not event_id:

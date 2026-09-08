@@ -132,7 +132,18 @@ class AdminServerTests(unittest.TestCase):
                 self.assertIn("AddressBook", addressbook)
                 self.assertIn("CABN", addressbook)
                 self.assertIn("!cabn", addressbook)
+                self.assertIn("Edit", addressbook)
                 self.assertNotIn("!seen", addressbook)
+
+                with opener.open(f"{base}/edit-addressbook?node_id=%21cabn") as response:
+                    edit_page = response.read().decode("utf-8")
+                self.assertIn("Edit AddressBook ID", edit_page)
+                self.assertIn("CABN", edit_page)
+
+                edit_data = urlencode({"node_id": "!cabn", "display_name": "HOME"}).encode("utf-8")
+                with opener.open(Request(f"{base}/edit-addressbook", data=edit_data, method="POST")):
+                    pass
+                self.assertEqual("HOME", Database(db_path).get_user("!cabn")["display_name"])
 
                 remove_data = urlencode({"node_id": "!cabn"}).encode("utf-8")
                 with opener.open(Request(f"{base}/remove-addressbook", data=remove_data, method="POST")):
