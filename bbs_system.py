@@ -1,14 +1,24 @@
 import os
 import importlib
+import time
+import logging
+from config import load_config
+from database import Database
 from interface import Interface
+from location_service import location_age, stale_location_message
 
 
 class BBSSystem:
-    def __init__(self):
+    def __init__(self, config=None, database=None, interface=None):
+        self.config = config or load_config()
+        self.db = database or Database(self.config["database"]["path"])
         self.users = {}  # Store user states keyed by their IDs
+        self.node_locations = {}
         self.menu_modules = self.load_menu_modules()  # Load menu modules
-        self.interface = Interface()  # Initialize the Meshtastic interface
+        self.interface = interface or Interface(self.config)  # Initialize the Meshtastic interface
         self.interface.handle_message = self.handle_message  # Link message handling
+        self.interface.handle_position = self.update_node_location
+        self.logger = logging.getLogger(__name__)
 
     def load_menu_modules(self):
         """
@@ -41,7 +51,19 @@ class BBSSystem:
                         print(f"Skipping {module_name}: Missing required attributes")
                 except Exception as e:
                     print(f"Error loading module '{module_name}': {e}")
-            elif os.path.isdir(item_path):  # Handle folders as submenus
+            elif os.path.isdir(item_path):  # Handle folders as package modules or submenus
+                package_module_name = f"modules.{item}"
+                try:
+                    package_module = importlib.import_module(package_module_name)
+                    if hasattr(package_module, "menu_name") and hasattr(package_module, "process_command"):
+                        menu_name = package_module.menu_name.strip()
+                        if menu_name:
+                            print(f"Loaded package module: {menu_name}")
+                            menu_modules[menu_name] = package_module
+                            continue
+                except Exception:
+                    pass
+
                 submenu = {}
                 for sub_file in os.listdir(item_path):
                     if sub_file.endswith(".py") and not sub_file.startswith("__"):
@@ -68,8 +90,15 @@ class BBSSystem:
         """
         Process messages received from the interface.
         """
+        self.db.upsert_user(user_id)
         if user_id not in self.users:
-            response = self.start_session(user_id)
+            welcome = self.start_session(user_id)
+            if message.strip():
+                response = self.process_command(user_id, message)
+                if response.startswith("Invalid"):
+                    return f"{welcome}\n\n{response}"
+                return response
+            return welcome
         else:
             response = self.process_command(user_id, message)
         return response
@@ -80,6 +109,44 @@ class BBSSystem:
         """
         self.users[user_id] = {"menu": ["main"]}  # Menu stack to track navigation
         return self.display_menu(user_id)
+
+    def update_node_location(self, user_id, position):
+        latitude = position.get("latitude")
+        longitude = position.get("longitude")
+        if latitude is None or longitude is None:
+            return
+        try:
+            latitude = float(latitude)
+            longitude = float(longitude)
+        except (TypeError, ValueError):
+            self.logger.warning("Ignoring malformed GPS location from %s", user_id)
+            return
+
+        timestamp = position.get("timestamp", position.get("time"))
+        received_at = int(time.time())
+        self.node_locations[user_id] = {
+            "latitude": latitude,
+            "longitude": longitude,
+            "altitude": position.get("altitude"),
+            "timestamp": int(timestamp) if timestamp else received_at,
+            "received_at": received_at,
+        }
+
+    def get_latest_location(self, user_id):
+        return self.node_locations.get(user_id)
+
+    def get_location_age(self, user_id):
+        return location_age(self.get_latest_location(user_id))
+
+    def get_recent_location_or_message(self, user_id):
+        location = self.get_latest_location(user_id)
+        if not location:
+            return None, "No GPS position is available for your node yet.\nWait for your node to send a position update and try again."
+        age = self.get_location_age(user_id)
+        freshness = self.config["gps"]["freshness_seconds"]
+        if age is not None and age > freshness:
+            return None, stale_location_message(age)
+        return location, None
 
     def process_command(self, user_id, command):
         """
@@ -113,12 +180,11 @@ class BBSSystem:
             return self.handle_main_menu(user_id, command)
         elif current_menu in self.menu_modules:
             menu_data = self.menu_modules[current_menu]
-            if "submodules" in menu_data:
+            if isinstance(menu_data, dict) and "submodules" in menu_data:
                 return self.handle_submenu(user_id, command, menu_data["submodules"])
             elif hasattr(menu_data, "process_command"):
-                # Assign control to the module
                 self.users[user_id]["module_control"] = menu_data
-                return menu_data.display_menu() if hasattr(menu_data, "display_menu") else "Entering module..."
+                return menu_data.process_command(user_id, command, self)
             else:
                 return "Invalid command."
         else:
@@ -134,10 +200,11 @@ class BBSSystem:
             if 0 <= command_index < len(menu_names):
                 selected_menu = menu_names[command_index]
                 self.users[user_id]["menu"].append(selected_menu)  # Add to the menu stack
-                if "submodules" in self.menu_modules[selected_menu]:
+                if isinstance(self.menu_modules[selected_menu], dict) and "submodules" in self.menu_modules[selected_menu]:
                     return self.display_submenu(selected_menu)
                 else:
                     module = self.menu_modules[selected_menu]
+                    self.users[user_id]["module_control"] = module
                     return module.display_menu() if hasattr(module, "display_menu") else "No menu available."
             else:
                 return "Invalid option."
@@ -168,12 +235,19 @@ class BBSSystem:
 
         if current_menu == "main":
             menu_text = "Main Menu:\n"
+            unread = self.db.unread_count(user_id)
+            if unread:
+                menu_text = f"Welcome back.\nYou have {unread} unread message{'s' if unread != 1 else ''}.\n\n" + menu_text
             for index, menu_name in enumerate(self.menu_modules.keys(), start=1):
                 menu_text += f"{index}. {menu_name}\n"
             menu_text += "Choose an option (e.g., '1').\n"
             menu_text += "'top' to go to Main Menu, 'cd ..' to go back one menu."
             return menu_text
-        elif current_menu in self.menu_modules and "submodules" in self.menu_modules[current_menu]:
+        elif (
+            current_menu in self.menu_modules
+            and isinstance(self.menu_modules[current_menu], dict)
+            and "submodules" in self.menu_modules[current_menu]
+        ):
             return self.display_submenu(current_menu)
         else:
             return "Invalid menu."

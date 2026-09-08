@@ -1,0 +1,13 @@
+[Unit]
+Description=MeshBoard Meshtastic BBS
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/MeshBoard
+ExecStart=%h/MeshBoard/.venv/bin/python %h/MeshBoard/bbs_system.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

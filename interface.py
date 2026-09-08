@@ -1,12 +1,28 @@
-import json
 import os
 import logging
-from meshtastic.serial_interface import SerialInterface
-from pubsub import pub
 import time
-import requests
+from config import load_config, CONFIG_FILE
 
-CONFIG_FILE = "meshtastic_config.json"
+try:
+    from pubsub import pub
+except ImportError:
+    pub = None
+
+try:
+    from meshtastic.serial_interface import SerialInterface
+except ImportError:
+    SerialInterface = None
+
+try:
+    from meshtastic.tcp_interface import TCPInterface
+except ImportError:
+    TCPInterface = None
+
+try:
+    from meshtastic.ble_interface import BLEInterface
+except ImportError:
+    BLEInterface = None
+
 LOG_FILE = "listener.log"
 
 # Configure logging
@@ -22,45 +38,122 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class Interface:
-    def __init__(self):
+    def __init__(self, config=None, config_file=CONFIG_FILE):
+        self.config = config or load_config()
+        self.config_file = config_file if config is None else None
         self.interface = None
         self.handle_message = None  # Callback for message handling
+        self.handle_position = None
+        self._seen_packet_ids = []
+
+    def _is_direct_text_packet(self, packet):
+        to_id = packet.get("toId")
+        to_num = packet.get("to")
+        if to_id in (None, "^all"):
+            return False
+        if to_num in (None, 0xFFFFFFFF):
+            return False
+        return True
 
     def load_device_path(self):
         """Load the device path from the configuration file."""
-        if not os.path.exists(CONFIG_FILE):
-            logger.error(f"Configuration file '{CONFIG_FILE}' not found. Please run setup.py to create it.")
-            return None
+        config_file = self.config_file or CONFIG_FILE
+        if not os.path.exists(config_file):
+            logger.warning(f"Configuration file '{CONFIG_FILE}' not found. Using default device path.")
+            return self.config["device_path"]
 
         try:
-            with open(CONFIG_FILE, "r") as config_file:
-                config = json.load(config_file)
-                device_path = config.get("device_path")
-                if not device_path:
-                    logger.error(f"'device_path' not found in '{CONFIG_FILE}'.")
-                    return None
-                logger.info(f"Loaded device path from config: {device_path}")
-                return device_path
+            self.config = load_config(config_file)
+            device_path = self.config.get("device_path")
+            if not device_path:
+                logger.error(f"'device_path' not found in '{CONFIG_FILE}'.")
+                return None
+            logger.info(f"Loaded device path from config: {device_path}")
+            return device_path
         except Exception as e:
             logger.error(f"Error reading configuration file '{CONFIG_FILE}': {e}")
             return None
 
+    def reload_config(self):
+        if self.config_file and os.path.exists(self.config_file):
+            self.config = load_config(self.config_file)
+        return self.config
+
+    def configured_transports(self):
+        config = self.reload_config()
+        preferred = str(config.get("connection_type", "auto")).lower()
+        all_transports = ["serial", "wifi", "bluetooth"]
+        if preferred == "auto":
+            return all_transports
+        if preferred in all_transports:
+            return [preferred] + [transport for transport in all_transports if transport != preferred]
+        logger.warning("Unknown connection_type '%s'. Falling back to auto.", preferred)
+        return all_transports
+
+    def _connect_serial(self):
+        device_path = self.config.get("device_path")
+        if not device_path:
+            logger.info("Skipping USB serial: no device_path configured.")
+            return None
+        if SerialInterface is None:
+            logger.error("Meshtastic serial support is unavailable. Run: pip3 install meshtastic")
+            return None
+        logger.info(f"Attempting USB serial Meshtastic connection at {device_path}...")
+        return SerialInterface(devPath=device_path)
+
+    def _connect_wifi(self):
+        wifi_config = self.config.get("wifi", {})
+        hostname = wifi_config.get("hostname")
+        port = int(wifi_config.get("port", 4403))
+        if not hostname:
+            logger.info("Skipping WiFi/TCP: no wifi.hostname configured.")
+            return None
+        if TCPInterface is None:
+            logger.error("Meshtastic TCP support is unavailable. Run: pip3 install meshtastic")
+            return None
+        logger.info(f"Attempting WiFi/TCP Meshtastic connection to {hostname}:{port}...")
+        return TCPInterface(hostname=hostname, portNumber=port)
+
+    def _connect_bluetooth(self):
+        bluetooth_config = self.config.get("bluetooth", {})
+        address = bluetooth_config.get("address") or None
+        if not address:
+            logger.info("Skipping Bluetooth/BLE: no bluetooth.address configured.")
+            return None
+        if BLEInterface is None:
+            logger.error("Meshtastic BLE support is unavailable. Run: pip3 install meshtastic")
+            return None
+        logger.info(f"Attempting Bluetooth/BLE Meshtastic connection to {address}...")
+        return BLEInterface(address=address)
+
     def connect(self):
         """Attempt to connect to the Meshtastic device."""
-        device_path = self.load_device_path()
-        if not device_path:
-            logger.error("Device path could not be loaded. Exiting...")
+        self.reload_config()
+        if pub is None:
+            logger.error("Meshtastic dependencies are not installed. Run: pip3 install meshtastic")
+            self.interface = None
             return
 
-        logger.info(f"Attempting to connect to the Meshtastic device at {device_path}...")
-        try:
-            # Initialize the SerialInterface object with the specified device path
-            self.interface = SerialInterface(devPath=device_path)
-            logger.info(f"Successfully connected to Meshtastic device on {device_path}")
-            pub.subscribe(self.on_receive, "meshtastic.receive")
-        except Exception as e:
-            logger.error(f"Failed to connect to Meshtastic device: {e}")
-            self.interface = None
+        connectors = {
+            "serial": self._connect_serial,
+            "wifi": self._connect_wifi,
+            "bluetooth": self._connect_bluetooth,
+        }
+        for transport in self.configured_transports():
+            try:
+                connection = connectors[transport]()
+                if not connection:
+                    continue
+                self.interface = connection
+                pub.subscribe(self.on_receive, "meshtastic.receive")
+                pub.subscribe(self.on_receive, "meshtastic.receive.text")
+                pub.subscribe(self.on_receive, "meshtastic.receive.position")
+                logger.info(f"Successfully connected to Meshtastic device using {transport}.")
+                return
+            except Exception as e:
+                logger.warning(f"Failed to connect using {transport}: {e}")
+                self.interface = None
+        logger.error("Could not connect to Meshtastic by USB serial, WiFi/TCP, or Bluetooth/BLE.")
 
     def disconnect(self):
         """Safely disconnect the Meshtastic device."""
@@ -80,44 +173,94 @@ class Interface:
             decoded = packet.get("decoded", {})
             text = decoded.get("text", None)
             sender = packet.get("fromId", None)
+            packet_id = packet.get("id")
+            if packet_id is not None:
+                dedupe_key = (packet_id, sender, decoded.get("portnum"))
+                if dedupe_key in self._seen_packet_ids:
+                    return
+                self._seen_packet_ids.append(dedupe_key)
+                self._seen_packet_ids = self._seen_packet_ids[-1000:]
 
             # Handle standard text messages
             if text and sender:
-                logger.info(f"Message received from {sender}: {text}")
+                if not self._is_direct_text_packet(packet):
+                    logger.info("Ignoring non-direct text message from %s", sender)
+                    return
+                logger.info(f"Message received from {sender}")
                 if self.handle_message:
                     response = self.handle_message(sender, text)
                     if response:
-                        self.send_message(sender, response)
+                        self.send_message(sender, response, reply_id=packet_id)
 
             # Handle telemetry data
-            position = packet.get("position", None)
+            position = packet.get("position") or decoded.get("position")
             if position:
                 latitude = position.get("latitude", None)
                 longitude = position.get("longitude", None)
                 altitude = position.get("altitude", None)
-                time = position.get("time", None)
+                timestamp = position.get("time", None)
 
-                if latitude and longitude:
-                    logger.info(f"Telemetry received from {sender}: Latitude: {latitude}, Longitude: {longitude}")
-                    self.log_telemetry(sender, latitude, longitude, altitude, time)
+                if latitude is not None and longitude is not None and sender:
+                    logger.info(f"Position received from {sender}")
+                    if self.handle_position:
+                        self.handle_position(sender, {
+                            "latitude": latitude,
+                            "longitude": longitude,
+                            "altitude": altitude,
+                            "timestamp": timestamp,
+                        })
+                    if self.config["gps"].get("log_raw_history", False):
+                        self.log_telemetry(sender, latitude, longitude, altitude, timestamp)
 
                 if altitude:
                     logger.info(f"Altitude: {altitude} meters")
-                if time:
-                    logger.info(f"Timestamp: {time}")
+                if timestamp:
+                    logger.info(f"Timestamp: {timestamp}")
             else:
                 logger.debug("Received invalid or incomplete packet.")
         except Exception as e:
             logger.error(f"Error processing received message: {e}")
 
-    def send_message(self, user_id, message):
+    def send_message(self, user_id, message, reply_id=None):
         """Send a message back to the user."""
+        if not self.interface:
+            logger.error("Cannot send message to %s because the interface is disconnected.", user_id)
+            return
         try:
             destination = int(user_id.lstrip("!"), 16)  # Remove `!` and convert to int
-            self.interface.sendText(message, destinationId=destination)
-            logger.info(f"Sent message to {user_id}: {message}")
+            for chunk in self.chunk_message(message):
+                self.interface.sendText(
+                    chunk,
+                    destinationId=destination,
+                    wantAck=True,
+                    replyId=reply_id,
+                )
+                logger.info(f"Sent message to {user_id}")
+                reply_id = None
+                delay = self.config["meshtastic"].get("chunk_delay_seconds", 0)
+                if delay:
+                    time.sleep(delay)
         except Exception as e:
             logger.error(f"Failed to send message to {user_id}: {e}")
+
+    def chunk_message(self, message):
+        max_length = int(self.config["meshtastic"].get("max_text_length", 180))
+        if max_length <= 0 or len(message) <= max_length:
+            return [message]
+
+        chunks = []
+        remaining = message
+        while len(remaining) > max_length:
+            split_at = remaining.rfind(" ", 0, max_length + 1)
+            newline_at = remaining.rfind("\n", 0, max_length + 1)
+            split_at = max(split_at, newline_at)
+            if split_at < max_length // 2:
+                split_at = max_length
+            chunks.append(remaining[:split_at].rstrip())
+            remaining = remaining[split_at:].lstrip()
+        if remaining:
+            chunks.append(remaining)
+        return chunks
 
     def log_telemetry(self, sender, latitude, longitude, altitude, timestamp):
         """Log telemetry data to a CSV file."""
@@ -131,16 +274,24 @@ class Interface:
     def run(self):
         """Run the interface."""
         try:
-            self.connect()
-            if not self.interface:
-                logger.error("Could not connect to the Meshtastic device. Exiting...")
-                return
+            while True:
+                self.connect()
+                if not self.interface:
+                    delay = self.config["meshtastic"].get("reconnect_delay_seconds", 10)
+                    logger.warning("Meshtastic connection unavailable. Retrying in %s seconds...", delay)
+                    time.sleep(delay)
+                    continue
 
-            logger.info("Listening for messages... Press Ctrl+C to exit.")
-            while self.interface:  # Continue listening while connected
-                time.sleep(0.01)  # Prevent high CPU usage
-        except Exception as e:
-            logger.warning(f"Connection lost: {e}")
+                logger.info("Listening for messages... Press Ctrl+C to exit.")
+                try:
+                    while self.interface:
+                        time.sleep(0.1)
+                except Exception as e:
+                    logger.warning(f"Connection lost: {e}")
+                    self.disconnect()
+                    delay = self.config["meshtastic"].get("reconnect_delay_seconds", 10)
+                    logger.warning("Retrying in %s seconds...", delay)
+                    time.sleep(delay)
         except KeyboardInterrupt:
             logger.info("Shutting down on Ctrl+C...")
         finally:
@@ -150,4 +301,3 @@ class Interface:
 if __name__ == "__main__":
     interface = Interface()
     interface.run()
-

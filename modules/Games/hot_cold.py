@@ -1,5 +1,5 @@
 import time
-import math
+from location_service import distance_between_locations
 
 menu_name = "Hot Cold"  # Required for module loading
 
@@ -14,15 +14,8 @@ def display_menu():
            "'cd ..' to return to the main menu."
 
 def haversine(lat1, lon1, lat2, lon2):
-    """Calculate the distance in meters between two latitude/longitude points."""
-    R = 6371e3  # Radius of the Earth in meters
-    phi1 = math.radians(lat1)
-    phi2 = math.radians(lat2)
-    delta_phi = math.radians(lat2 - lat1)
-    delta_lambda = math.radians(lon2 - lon1)
-    a = math.sin(delta_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return R * c
+    """Compatibility wrapper for older tests/imports."""
+    return distance_between_locations(lat1, lon1, lat2, lon2)
 
 def process_command(user_id, command, bbs_system):
     """Handle commands for the Hot Cold game."""
@@ -36,7 +29,7 @@ def process_command(user_id, command, bbs_system):
         user_state["hot_cold"] = {
             "target_location": (35.652832, -97.478095),  # Example target (lat, lon)
             "durations": {"1": 30, "2": 60},
-            "player_distances": {},
+            "last_distance": None,
             "timer": None
         }
 
@@ -49,7 +42,7 @@ def process_command(user_id, command, bbs_system):
     if command in game["durations"]:
         duration = game["durations"][command]
         game["timer"] = time.time() + duration  # Set the timer
-        return f"Hot Cold game started! You have {duration} seconds per round."
+        return f"Hot Cold game started! You have {duration} seconds per round.\nSend any message for distance feedback."
 
     if not game["timer"]:
         return "No game in progress. Start a game first!"
@@ -59,42 +52,40 @@ def process_command(user_id, command, bbs_system):
     if remaining_time <= 0:
         return handle_game_update(user_id, bbs_system)
 
-    return f"Time remaining: {int(remaining_time)} seconds."
+    return handle_game_update(user_id, bbs_system, reset_timer=False)
 
-def handle_game_update(user_id, bbs_system):
+def handle_game_update(user_id, bbs_system, reset_timer=True):
     """Process the game update at the end of each round."""
     user_state = bbs_system.users[user_id]
     game = user_state["hot_cold"]
 
-    # Example positions: these should come from the interface
-    player_positions = {
-        "!user1": (35.652000, -97.478000),  # Example lat/lon
-        "!user2": (35.651500, -97.477500),
-    }
+    location, message = bbs_system.get_recent_location_or_message(user_id)
+    if message:
+        return message
 
     target_lat, target_lon = game["target_location"]
+    distance = distance_between_locations(
+        target_lat,
+        target_lon,
+        location["latitude"],
+        location["longitude"],
+    )
+    previous = game.get("last_distance")
+    game["last_distance"] = distance
 
-    # Calculate distances and determine "warmer" or "colder"
-    messages = []
-    for player_id, (player_lat, player_lon) in player_positions.items():
-        distance = haversine(target_lat, target_lon, player_lat, player_lon)
-        prev_distance = game["player_distances"].get(player_id, float("inf"))
+    if distance <= 3:
+        game["timer"] = None
+        return "HOT! You found the target!"
 
-        if player_id not in game["player_distances"]:
-            messages.append(f"Player {player_id}: {int(distance)} meters from the target.")
-        else:
-            if distance < prev_distance:
-                messages.append(f"Player {player_id}: Warmer! {int(distance)} meters away.")
-            else:
-                messages.append(f"Player {player_id}: Colder! {int(distance)} meters away.")
+    if previous is None:
+        feedback = f"You are {int(distance)} meters from the target."
+    elif distance < previous:
+        feedback = f"You are {int(distance)} meters from the target.\nWarmer!"
+    elif distance > previous:
+        feedback = f"Colder!\nYou are {int(distance)} meters away."
+    else:
+        feedback = f"Same distance.\nYou are {int(distance)} meters away."
 
-        game["player_distances"][player_id] = distance
-
-        # Check if a player is within 10 feet (3 meters)
-        if distance <= 3:
-            return f"HOT! Player {player_id} found the target!"
-
-    # Reset the timer for the next round
-    game["timer"] = time.time() + game["durations"]["1"]  # Default to 30 seconds
-
-    return "\n".join(messages)
+    if reset_timer:
+        game["timer"] = time.time() + game["durations"]["1"]  # Default to 30 seconds
+    return feedback

@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+listener.log
+telemetry_log.csv
+meshtastic_config.json
+meshboard.db
+local-com5-*.yaml
+*-radio.yaml

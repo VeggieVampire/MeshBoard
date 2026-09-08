@@ -1,9 +1,9 @@
 import json
 import logging
+import copy
 import serial.tools.list_ports
 from meshtastic.serial_interface import SerialInterface
-
-CONFIG_FILE = "meshtastic_config.json"
+from config import DEFAULT_CONFIG, CONFIG_FILE
 
 logging.basicConfig(
     level=logging.INFO,  # Set to INFO for less verbose output
@@ -38,7 +38,8 @@ def find_meshtastic_device():
 def create_config_file(dev_path):
     """Create the configuration file with the detected device path."""
     logger.info(f"Creating configuration file '{CONFIG_FILE}'...")
-    config_data = {"device_path": dev_path}  # Updated key to 'device_path'
+    config_data = copy.deepcopy(DEFAULT_CONFIG)
+    config_data["device_path"] = dev_path
     try:
         with open(CONFIG_FILE, "w") as f:
             json.dump(config_data, f, indent=4)
