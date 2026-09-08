@@ -18,6 +18,47 @@ class AdminServerTests(unittest.TestCase):
         self.assertTrue(check_password("secret", hashed))
         self.assertFalse(check_password("wrong", hashed))
 
+    def test_dashboard_uses_clickable_section_links(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "meshboard.db")
+            Database(db_path).record_user_command("!cabn", "CABN")
+            config = {
+                "host": "127.0.0.1",
+                "port": 0,
+                "username": "sysop",
+                "password_hash": make_password_hash("secret"),
+                "session_secret": "test-secret",
+                "database": {"path": db_path},
+            }
+            server = ThreadingHTTPServer(("127.0.0.1", 0), AdminHandler)
+            server.config = config
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base = f"http://127.0.0.1:{server.server_address[1]}"
+                opener = build_opener(HTTPCookieProcessor(CookieJar()))
+                login_data = urlencode({"username": "sysop", "password": "secret"}).encode("utf-8")
+                with opener.open(Request(f"{base}/login", data=login_data, method="POST")):
+                    pass
+
+                with opener.open(f"{base}/") as response:
+                    dashboard = response.read().decode("utf-8")
+                for path, label in (
+                    ("/users", "Users"),
+                    ("/addressbook", "AddressBook"),
+                    ("/messages", "Mail"),
+                    ("/board", "Message Board"),
+                    ("/locations", "Locations"),
+                    ("/checkins", "Check-Ins"),
+                    ("/logs", "Logs"),
+                ):
+                    self.assertIn(f"<a class='dashboard-link' href='{path}'>", dashboard)
+                    self.assertIn(f"<h2>{label}</h2>", dashboard)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
     def test_login_and_delete_message(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "meshboard.db")

@@ -207,6 +207,9 @@ button {{ cursor: pointer; }}
 .danger {{ background: #5f1f2a; border-color: #8a2e3d; }}
 .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }}
 .card {{ background: #151f2d; border: 1px solid #2d3a4d; border-radius: 8px; padding: 12px; }}
+.dashboard-link {{ display: block; background: #151f2d; border: 1px solid #2d3a4d; border-radius: 8px; padding: 14px; color: #e6edf3; text-decoration: none; }}
+.dashboard-link:hover {{ border-color: #5b7190; background: #1a2636; }}
+.dashboard-link h2 {{ margin-top: 0; }}
 .tabs {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }}
 .tabs a {{ background: #151f2d; color: #e6edf3; border: 1px solid #38475b; border-radius: 6px; padding: 8px 10px; text-decoration: none; }}
 .tabs a.active {{ background: #2d415d; border-color: #5b779b; }}
@@ -372,21 +375,52 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
 
     def show_dashboard(self):
         with db_connect(self.config) as conn:
-            counts = {}
-            for table in ("users", "messages", "board_posts", "locations", "checkin_events"):
-                counts[table] = conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"]
-            counts["addressbook"] = conn.execute(
-                """
-                SELECT COUNT(*) AS count
-                FROM users
-                WHERE mail_listed = 1 AND display_name IS NOT NULL AND display_name != ''
-                """
-            ).fetchone()["count"]
+            dashboard_links = [
+                ("/users", "Users", conn.execute("SELECT COUNT(*) AS count FROM users").fetchone()["count"], "recent operators"),
+                (
+                    "/addressbook",
+                    "AddressBook",
+                    conn.execute(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM users
+                        WHERE mail_listed = 1 AND display_name IS NOT NULL AND display_name != ''
+                        """
+                    ).fetchone()["count"],
+                    "listed contacts",
+                ),
+                ("/messages", "Mail", conn.execute("SELECT COUNT(*) AS count FROM messages").fetchone()["count"], "stored messages"),
+                (
+                    "/board",
+                    "Message Board",
+                    conn.execute("SELECT COUNT(*) AS count FROM board_posts WHERE deleted = 0").fetchone()["count"],
+                    "active posts",
+                ),
+                (
+                    "/locations",
+                    "Locations",
+                    conn.execute("SELECT COUNT(*) AS count FROM locations WHERE deleted = 0").fetchone()["count"],
+                    "active notes",
+                ),
+                (
+                    "/checkins",
+                    "Check-Ins",
+                    conn.execute("SELECT COUNT(*) AS count FROM checkin_events").fetchone()["count"],
+                    "events",
+                ),
+                ("/logs", "Logs", "", "recent service output"),
+            ]
         body = "<div class='grid'>" + "".join(
-            f"<div class='card'><h2>{esc(name.replace('_', ' ').title())}</h2><p>{count}</p></div>"
-            for name, count in counts.items()
+            (
+                f"<a class='dashboard-link' href='{esc(path)}'>"
+                f"<h2>{esc(label)}</h2>"
+                f"<p>{esc(count)}</p>"
+                f"<p class='muted'>{esc(description)}</p>"
+                "</a>"
+            )
+            for path, label, count, description in dashboard_links
         ) + "</div>"
-        body += "<p class='muted'>Local-only SysOp tools. Delete actions change meshboard.db immediately.</p>"
+        body += "<p class='muted'>Local-only SysOp tools. Edit/delete/remove/close actions change meshboard.db immediately.</p>"
         self.send_html("Dashboard", body)
 
     def show_users(self):
