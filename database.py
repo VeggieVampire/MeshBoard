@@ -96,6 +96,12 @@ class Database:
                     PRIMARY KEY (event_id, node_id),
                     FOREIGN KEY (event_id) REFERENCES checkin_events(id)
                 );
+
+                CREATE TABLE IF NOT EXISTS game_settings (
+                    module_name TEXT PRIMARY KEY,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    updated_at INTEGER NOT NULL
+                );
                 """
             )
             columns = {
@@ -452,3 +458,33 @@ class Database:
                 (int(time.time()), location_id, creator_id),
             )
             return cursor.rowcount > 0
+
+    def is_game_enabled(self, module_name):
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT enabled FROM game_settings WHERE module_name = ?",
+                (module_name,),
+            ).fetchone()
+        if not row:
+            return True
+        return bool(row["enabled"])
+
+    def game_settings(self):
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT * FROM game_settings ORDER BY module_name COLLATE NOCASE"
+            ).fetchall()
+
+    def set_game_enabled(self, module_name, enabled):
+        now = int(time.time())
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO game_settings (module_name, enabled, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(module_name) DO UPDATE SET
+                    enabled = excluded.enabled,
+                    updated_at = excluded.updated_at
+                """,
+                (module_name, 1 if enabled else 0, now),
+            )

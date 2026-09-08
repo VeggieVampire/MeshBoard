@@ -1,9 +1,11 @@
+import ast
 import base64
 import hashlib
 import hmac
 import html
 import json
 import os
+import re
 import secrets
 import sqlite3
 import time
@@ -24,6 +26,7 @@ BOARD_CATEGORIES = [
     ("events", "Events"),
     ("rumors", "Rumors & Gossip"),
 ]
+GAME_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 
 def load_config(path=CONFIG_PATH):
@@ -61,6 +64,13 @@ def check_password(password, password_hash):
 
 def resolve_db_path(config):
     path = config.get("database", {}).get("path", "meshboard.db")
+    if not os.path.isabs(path):
+        path = os.path.join(APP_DIR, path)
+    return path
+
+
+def resolve_games_dir(config):
+    path = config.get("games_dir", os.path.join(APP_DIR, "modules", "Games"))
     if not os.path.isabs(path):
         path = os.path.join(APP_DIR, path)
     return path
@@ -185,6 +195,7 @@ class AdminHandler(BaseHTTPRequestHandler):
                 ("/messages", "Mail"),
                 ("/board", "Board"),
                 ("/locations", "Locations"),
+                ("/games", "Games"),
                 ("/checkins", "Check-Ins"),
                 ("/logs", "Logs"),
                 ("/logout", "Logout"),
@@ -262,6 +273,8 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
             "/edit-board": self.show_edit_board,
             "/locations": self.show_locations,
             "/edit-location": self.show_edit_location,
+            "/games": self.show_games,
+            "/import-game": self.show_import_game,
             "/checkins": self.show_checkins,
             "/edit-checkin": self.show_edit_checkin,
             "/logs": self.show_logs,
@@ -317,6 +330,15 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
                     self.show_edit_location(error, data)
                 else:
                     self.redirect("/locations?edited=1")
+            elif action == "/set-game-enabled":
+                self.set_game_enabled(data.get("module_name"), data.get("enabled") == "1")
+                self.redirect("/games?updated=1")
+            elif action == "/import-game":
+                error = self.import_game(data)
+                if error:
+                    self.show_import_game(error, data)
+                else:
+                    self.redirect("/games?imported=1")
             elif action == "/delete-user":
                 self.delete_user(data.get("node_id"))
                 self.redirect("/users?deleted=1")
@@ -411,6 +433,7 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
                     conn.execute("SELECT COUNT(*) AS count FROM locations WHERE deleted = 0").fetchone()["count"],
                     "active notes",
                 ),
+                ("/games", "Games", len(self.discover_games(conn)), "installed plugins"),
                 (
                     "/checkins",
                     "Check-Ins",
@@ -779,6 +802,96 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
         )
         self.send_html("Edit Location", body)
 
+    def discover_games(self, conn=None):
+        games_dir = resolve_games_dir(self.config)
+        settings = {}
+        close_conn = False
+        if conn is None:
+            conn = sqlite3.connect(resolve_db_path(self.config))
+            conn.row_factory = sqlite3.Row
+            close_conn = True
+        try:
+            settings = {
+                row["module_name"]: row["enabled"]
+                for row in conn.execute("SELECT module_name, enabled FROM game_settings").fetchall()
+            }
+        finally:
+            if close_conn:
+                conn.close()
+
+        games = []
+        if not os.path.isdir(games_dir):
+            return games
+        for filename in sorted(os.listdir(games_dir)):
+            if not filename.endswith(".py") or filename.startswith("__"):
+                continue
+            path = os.path.join(games_dir, filename)
+            module_name = filename[:-3]
+            menu_name = module_name
+            valid = False
+            try:
+                with open(path, "r", encoding="utf-8") as handle:
+                    tree = ast.parse(handle.read(), filename=path)
+                functions = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
+                for node in tree.body:
+                    if (
+                        isinstance(node, ast.Assign)
+                        and any(isinstance(target, ast.Name) and target.id == "menu_name" for target in node.targets)
+                    ):
+                        menu_name = ast.literal_eval(node.value)
+                valid = bool(menu_name and "process_command" in functions)
+            except Exception:
+                valid = False
+            games.append(
+                {
+                    "module_name": module_name,
+                    "filename": filename,
+                    "menu_name": str(menu_name),
+                    "enabled": bool(settings.get(module_name, 1)),
+                    "valid": valid,
+                }
+            )
+        return games
+
+    def show_games(self):
+        games = self.discover_games()
+        body = "<p>{}</p>".format(link_button("/import-game", "Import Game Plugin"))
+        body += "<table><tr><th>Game</th><th>File</th><th>Status</th><th>Valid</th><th></th></tr>"
+        for game in games:
+            enabled = "Enabled" if game["enabled"] else "Disabled"
+            valid = "Yes" if game["valid"] else "No"
+            action_label = "Disable" if game["enabled"] else "Enable"
+            action_value = "0" if game["enabled"] else "1"
+            body += (
+                f"<tr><td>{esc(game['menu_name'])}</td><td>{esc(game['filename'])}</td>"
+                f"<td>{enabled}</td><td>{valid}</td>"
+                f"<td>{form_button('/set-game-enabled', {'module_name': game['module_name'], 'enabled': action_value}, action_label, False)}</td></tr>"
+            )
+        if not games:
+            body += "<tr><td colspan='5'>No game plugins installed.</td></tr>"
+        body += "</table>"
+        body += "<p class='muted'>Enable/disable applies to the live Games menu. Imported plugins load after MeshBoard restarts.</p>"
+        self.send_html("Games", body)
+
+    def show_import_game(self, error="", values=None):
+        values = values or {}
+        filename = values.get("filename", "")
+        source = values.get("source", "")
+        body = "<div class='card'><h2>Import Game Plugin</h2>"
+        if error:
+            body += f"<p class='flash'>{esc(error)}</p>"
+        body += (
+            "<form method='post' action='/import-game'>"
+            "<label>Plugin File Name</label>"
+            f"<input name='filename' placeholder='my_game.py' value='{esc(filename)}'>"
+            "<label>Python Source</label>"
+            f"<textarea name='source' placeholder='menu_name = \"My Game\"&#10;&#10;def display_menu(): ...&#10;def process_command(user_id, command, bbs_system): ...'>{esc(source)}</textarea>"
+            "<button>Import</button> "
+            "<a class='button' href='/games'>Cancel</a>"
+            "</form></div>"
+        )
+        self.send_html("Import Game", body)
+
     def show_checkins(self):
         with db_connect(self.config) as conn:
             events = conn.execute("SELECT * FROM checkin_events ORDER BY starts_at DESC LIMIT 100").fetchall()
@@ -1007,6 +1120,66 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
             )
         if cursor.rowcount == 0:
             return "Check-in not found."
+        return ""
+
+    def set_game_enabled(self, module_name, enabled):
+        module_name = (module_name or "").strip()
+        if not GAME_NAME_PATTERN.match(module_name):
+            return
+        with db_connect(self.config) as conn:
+            conn.execute(
+                """
+                INSERT INTO game_settings (module_name, enabled, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(module_name) DO UPDATE SET
+                    enabled = excluded.enabled,
+                    updated_at = excluded.updated_at
+                """,
+                (module_name, 1 if enabled else 0, int(time.time())),
+            )
+
+    def import_game(self, data):
+        filename = (data.get("filename") or "").strip()
+        source = data.get("source") or ""
+        if not filename.endswith(".py"):
+            filename += ".py"
+        module_name = filename[:-3]
+        if not GAME_NAME_PATTERN.match(module_name) or filename.startswith("__"):
+            return "Use a simple Python file name like my_game.py."
+        if not source.strip():
+            return "Paste the plugin Python source."
+        try:
+            tree = ast.parse(source, filename=filename)
+            compile(source, filename, "exec")
+        except SyntaxError as exc:
+            return f"Python syntax error on line {exc.lineno}: {exc.msg}"
+
+        functions = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
+        menu_name = ""
+        for node in tree.body:
+            if (
+                isinstance(node, ast.Assign)
+                and any(isinstance(target, ast.Name) and target.id == "menu_name" for target in node.targets)
+            ):
+                try:
+                    menu_name = ast.literal_eval(node.value)
+                except (ValueError, TypeError):
+                    menu_name = ""
+        if not menu_name:
+            return "Plugin must set menu_name to a text value."
+        if "process_command" not in functions:
+            return "Plugin must define process_command(user_id, command, bbs_system)."
+
+        games_dir = resolve_games_dir(self.config)
+        os.makedirs(games_dir, exist_ok=True)
+        destination = os.path.abspath(os.path.join(games_dir, filename))
+        if os.path.dirname(destination) != os.path.abspath(games_dir):
+            return "Invalid plugin path."
+        if os.path.exists(destination):
+            return "A game plugin with that file name already exists."
+        with open(destination, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(source.rstrip() + "\n")
+        self.set_game_enabled(module_name, True)
         return ""
 
     def set_addressbook_listed(self, node_id, listed):

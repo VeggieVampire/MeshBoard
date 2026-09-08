@@ -16,7 +16,7 @@ MeshBoard also keeps the attached radio clock sane. On startup it sets the Mesht
 - Message Board categories for general discussion, local news, trading, events, and rumors.
 - Events check-in board with a 24-hour HAM-style roster from AddressBook.
 - Location check-ins with optional comments that also appear in nearby location results.
-- Local SysOp admin website for viewing and deleting database content from the LAN or hotspot.
+- Local SysOp admin website for viewing database content, editing records, and enabling/disabling game plugins from the LAN or hotspot.
 - Live GPS-aware Location tools using the sender node's latest Meshtastic position.
 - Saved location notes, nearby note lookup, and Hot Cold GPS gameplay.
 - USB serial first, with WiFi/TCP and Bluetooth/BLE fallback.
@@ -213,6 +213,8 @@ Admin pages include Users activity, editable AddressBook contacts, active and ar
 
 The admin launcher watches for a usable IPv4 address before starting the website. If the Pi has no LAN or hotspot IP, the web server stays down and only the small launcher loop remains. If the IP disappears later, the launcher stops the website until an IP comes back. To change the check interval, set `ADMIN_IP_CHECK_INTERVAL_SECONDS` before running `scripts/run_admin_forever.sh`.
 
+The `Games` admin page discovers Python game plugins in `modules/Games`. Enable/disable changes apply to the live Games menu. Imported game plugins are saved into `modules/Games` and load after MeshBoard restarts.
+
 ## Connection Options
 
 Set `connection_type` to:
@@ -401,6 +403,7 @@ python -m unittest discover -s tests
 - `board_posts(id, category, author_id, body, created_at, deleted)`
 - `checkin_events(id, title, created_by, starts_at, ends_at, closed)`
 - `checkin_entries(event_id, node_id, checked_in_at)`
+- `game_settings(module_name, enabled, updated_at)`
 
 ## Manual Mail Test With Two Nodes
 

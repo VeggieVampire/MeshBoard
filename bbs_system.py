@@ -41,6 +41,11 @@ def is_number_choice(command):
         return False
 
 
+def game_module_key(module):
+    module_name = getattr(module, "__name__", "")
+    return module_name.rsplit(".", 1)[-1]
+
+
 class BBSSystem:
     def __init__(self, config=None, database=None, interface=None):
         self.config = config or load_config()
@@ -266,7 +271,7 @@ class BBSSystem:
         """
         try:
             command_index = int(command) - 1
-            submenu_names = list(submodules.keys())
+            submenu_names = list(self.enabled_submodules(submodules).keys())
             if 0 <= command_index < len(submenu_names):
                 selected_submodule = submodules[submenu_names[command_index]]
                 self.users[user_id]["module_control"] = selected_submodule  # Assign control to the submodule
@@ -277,6 +282,13 @@ class BBSSystem:
                 return "Invalid option."
         except ValueError:
             return "Invalid input. Please enter a number."
+
+    def enabled_submodules(self, submodules):
+        enabled = {}
+        for name, module in submodules.items():
+            if self.db.is_game_enabled(game_module_key(module)):
+                enabled[name] = module
+        return enabled
 
     def display_menu(self, user_id):
         """
@@ -307,7 +319,10 @@ class BBSSystem:
         Display a submenu to the user.
         """
         submodules = self.menu_modules[menu_name]["submodules"]
+        submodules = self.enabled_submodules(submodules)
         menu_text = f"{menu_name.capitalize()} Menu:\n"
+        if not submodules:
+            return f"{menu_name.capitalize()} Menu:\nNo games enabled.\n'cd ..' to go back."
         for index, sub_name in enumerate(submodules.keys(), start=1):
             menu_text += f"{index}. {sub_name}\n"
         menu_text += "Choose an option (e.g., '1').\n"

@@ -49,11 +49,72 @@ class AdminServerTests(unittest.TestCase):
                     ("/messages", "Mail"),
                     ("/board", "Message Board"),
                     ("/locations", "Locations"),
+                    ("/games", "Games"),
                     ("/checkins", "Check-Ins"),
                     ("/logs", "Logs"),
                 ):
                     self.assertIn(f"<a class='dashboard-link' href='{path}'>", dashboard)
                     self.assertIn(f"<h2>{label}</h2>", dashboard)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+    def test_games_page_toggles_and_imports_plugins(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "meshboard.db")
+            games_dir = os.path.join(tmpdir, "Games")
+            os.makedirs(games_dir)
+            with open(os.path.join(games_dir, "sample_game.py"), "w", encoding="utf-8") as handle:
+                handle.write(
+                    "menu_name = 'Sample Game'\n\n"
+                    "def display_menu():\n"
+                    "    return 'Sample Game'\n\n"
+                    "def process_command(user_id, command, bbs_system):\n"
+                    "    return 'ok'\n"
+                )
+            Database(db_path)
+            config = {
+                "host": "127.0.0.1",
+                "port": 0,
+                "username": "sysop",
+                "password_hash": make_password_hash("secret"),
+                "session_secret": "test-secret",
+                "database": {"path": db_path},
+                "games_dir": games_dir,
+            }
+            server = ThreadingHTTPServer(("127.0.0.1", 0), AdminHandler)
+            server.config = config
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base = f"http://127.0.0.1:{server.server_address[1]}"
+                opener = build_opener(HTTPCookieProcessor(CookieJar()))
+                login_data = urlencode({"username": "sysop", "password": "secret"}).encode("utf-8")
+                with opener.open(Request(f"{base}/login", data=login_data, method="POST")):
+                    pass
+
+                with opener.open(f"{base}/games") as response:
+                    games = response.read().decode("utf-8")
+                self.assertIn("Sample Game", games)
+                self.assertIn("Disable", games)
+                self.assertIn("Import Game Plugin", games)
+
+                disable_data = urlencode({"module_name": "sample_game", "enabled": "0"}).encode("utf-8")
+                with opener.open(Request(f"{base}/set-game-enabled", data=disable_data, method="POST")):
+                    pass
+                self.assertFalse(Database(db_path).is_game_enabled("sample_game"))
+
+                plugin_source = (
+                    "menu_name = 'Trail Quiz'\n\n"
+                    "def process_command(user_id, command, bbs_system):\n"
+                    "    return 'Trail Quiz'\n"
+                )
+                import_data = urlencode({"filename": "trail_quiz.py", "source": plugin_source}).encode("utf-8")
+                with opener.open(Request(f"{base}/import-game", data=import_data, method="POST")):
+                    pass
+                self.assertTrue(os.path.exists(os.path.join(games_dir, "trail_quiz.py")))
+                self.assertTrue(Database(db_path).is_game_enabled("trail_quiz"))
             finally:
                 server.shutdown()
                 server.server_close()

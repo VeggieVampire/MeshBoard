@@ -429,6 +429,18 @@ class MeshBoardTests(unittest.TestCase):
         self.assertIn("Added to AddressBook", self.bbs.handle_message(user, "yes"))
         self.assertIn("Archive", self.bbs.handle_message(user, "4"))
 
+    def test_disabled_game_is_hidden_from_games_menu(self):
+        self.bbs.db.set_game_enabled("zork", False)
+        user = "!nogame"
+        self.bbs.users[user] = {"menu": ["main", "Games"]}
+
+        menu = self.bbs.display_submenu("Games")
+        self.assertIn("Hot Cold", menu)
+        self.assertNotIn("ZORK", menu)
+
+        response = self.bbs.handle_submenu(user, "2", self.bbs.menu_modules["Games"]["submodules"])
+        self.assertIn("Tic Tac Toe", response)
+
     def test_whos_been_here_lists_recent_users_newest_first(self):
         now = int(time.time())
         self.bbs.db.set_mail_listed("!old", "LAKE", True)
