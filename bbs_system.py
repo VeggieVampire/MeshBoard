@@ -124,7 +124,7 @@ class BBSSystem:
         """
         Process messages received from the interface.
         """
-        self.db.upsert_user(user_id)
+        self.db.record_user_command(user_id)
         if user_id not in self.users:
             welcome = self.start_session(user_id)
             if message.strip():

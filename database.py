@@ -31,7 +31,8 @@ class Database:
                     display_name TEXT,
                     mail_listed INTEGER NOT NULL DEFAULT 0,
                     first_seen INTEGER NOT NULL,
-                    last_seen INTEGER NOT NULL
+                    last_seen INTEGER NOT NULL,
+                    command_count INTEGER NOT NULL DEFAULT 0
                 );
 
                 CREATE TABLE IF NOT EXISTS address_book (
@@ -101,6 +102,8 @@ class Database:
             }
             if "mail_listed" not in columns:
                 conn.execute("ALTER TABLE users ADD COLUMN mail_listed INTEGER NOT NULL DEFAULT 0")
+            if "command_count" not in columns:
+                conn.execute("ALTER TABLE users ADD COLUMN command_count INTEGER NOT NULL DEFAULT 0")
 
     def upsert_user(self, node_id, display_name=None, seen_at=None):
         seen_at = int(seen_at or time.time())
@@ -118,6 +121,24 @@ class Database:
                 )
         except sqlite3.Error as exc:
             logger.error("Could not update user %s: %s", node_id, exc)
+
+    def record_user_command(self, node_id, display_name=None, seen_at=None):
+        seen_at = int(seen_at or time.time())
+        try:
+            with self.connect() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO users (node_id, display_name, first_seen, last_seen, command_count)
+                    VALUES (?, ?, ?, ?, 1)
+                    ON CONFLICT(node_id) DO UPDATE SET
+                        display_name = COALESCE(excluded.display_name, users.display_name),
+                        last_seen = excluded.last_seen,
+                        command_count = users.command_count + 1
+                    """,
+                    (node_id, display_name, seen_at, seen_at),
+                )
+        except sqlite3.Error as exc:
+            logger.error("Could not record command for user %s: %s", node_id, exc)
 
     def get_user(self, node_id):
         with self.connect() as conn:

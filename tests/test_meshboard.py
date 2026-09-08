@@ -342,6 +342,21 @@ class MeshBoardTests(unittest.TestCase):
         self.assertIn("Seen: Today", response)
         self.assertIn("Seen: 3 days ago", response)
 
+    def test_whos_been_here_shows_command_counts(self):
+        user = "!counter"
+
+        self.bbs.handle_message(user, "top")
+        self.bbs.handle_message(user, "top")
+        self.bbs.db.create_board_post("general", user, "Posted outside message handling.")
+        self.bbs.db.create_checkin_event(user)
+
+        row = self.bbs.db.get_user(user)
+        self.assertEqual(2, row["command_count"])
+
+        self.bbs.users["!viewer"] = {"menu": ["main"]}
+        response = self.bbs.handle_message("!viewer", "4")
+        self.assertIn("Cmds: 2", response)
+
     def test_message_board_category_post_and_read(self):
         user = "!poster"
         self.bbs.db.set_mail_listed(user, "POST", True)

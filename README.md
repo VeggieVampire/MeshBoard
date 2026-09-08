@@ -12,7 +12,7 @@ MeshBoard also keeps the attached radio clock sane. On startup it sets the Mesht
 - Menu navigation with `top`, `cd ..`, and numbered choices.
 - Persistent SQLite store-and-forward mail keyed by Meshtastic node ID.
 - AddressBook opt-in with user-chosen 4-character IDs.
-- Who's Been Here list showing recent MeshBoard users, newest first.
+- Who's Been Here list showing automatic recent MeshBoard users, newest first, with command counts.
 - Message Board categories for general discussion, local news, trading, events, rumors, and a short header channel.
 - Events check-in board with a 24-hour HAM-style roster from AddressBook.
 - Local SysOp admin website for viewing and deleting database content from the LAN or hotspot.
@@ -32,7 +32,7 @@ MeshBoard also keeps the attached radio clock sane. On startup it sets the Mesht
 - `location_service.py` contains GPS freshness and Haversine helpers.
 - `modules/Mail/` provides inbox, send, AddressBook opt-in, reply, and archive flows.
 - `modules/MessageBoard/` provides public board categories and Events check-ins.
-- `modules/WhosBeenHere/` lists recent users by last interaction time.
+- `modules/WhosBeenHere/` lists automatic recent users by last interaction time and command count.
 - `modules/Location/` provides What's Here, Drop Note, and Nearby Notes.
 - `modules/Games/` remains dynamically loaded as the Games submenu.
 
@@ -338,6 +338,8 @@ Who's Been Here:
 
 - Shows users who have interacted with MeshBoard, newest first.
 - Uses the AddressBook/display name when available, otherwise the Meshtastic node ID.
+- Shows how many commands each user has sent to MeshBoard.
+- This is automatic activity tracking. It is not the same as Events check-in.
 
 Message Board:
 
@@ -346,6 +348,7 @@ Message Board:
 - In most categories, use `POST` to add a post, a number to read a post, `Next` for another page, and `BACK` to return.
 - In Events, `1` starts or joins the active 24-hour check-in, `2` refreshes the check-in roster, and `3` opens normal Event posts.
 - The Events check-in roster is based on AddressBook users and shows who is `In` and who is still `Out`.
+- Check-in is intentional HAM-style status for one active event. It is separate from automatic Recently Seen activity.
 
 Location:
 
@@ -405,7 +408,7 @@ python -m unittest discover -s tests
 
 `meshboard.db` is created automatically. Tables:
 
-- `users(node_id, display_name, first_seen, last_seen)`
+- `users(node_id, display_name, mail_listed, first_seen, last_seen, command_count)`
 - `address_book(owner_id, node_id, display_name, created_at, updated_at)`
 - `messages(id, sender_id, recipient_id, body, created_at, read_at, deleted_by_sender, deleted_by_recipient)`
 - `locations(id, creator_id, creator_name, latitude, longitude, altitude, body, created_at, updated_at, deleted, visibility)`

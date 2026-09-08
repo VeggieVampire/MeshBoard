@@ -40,7 +40,7 @@ def _render_users(user_id, bbs_system):
     lines = ["Who's Been Here"]
     for row in users[:PAGE_SIZE]:
         name = bbs_system.db.display_name_for(row["node_id"])
-        lines.append(f"{name:<10} Seen: {_seen_text(row['last_seen'])}")
+        lines.append(f"{name:<10} Seen: {_seen_text(row['last_seen'])} Cmds: {row['command_count']}")
     if len(users) > PAGE_SIZE:
         lines.append("Next")
     lines.append("cd .. - Back")
