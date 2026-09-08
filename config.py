@@ -27,6 +27,15 @@ DEFAULT_CONFIG = {
         "chunk_delay_seconds": 0.5,
         "reconnect_delay_seconds": 10,
     },
+    "time_sync": {
+        "sync_on_startup": True,
+        "sync_from_host": True,
+        "sync_from_mesh": True,
+        "sync_interval_seconds": 3600,
+        "minimum_valid_epoch": 1704067200,
+        "maximum_future_seconds": 172800,
+        "allow_receive_time": False,
+    },
     "database": {
         "path": "meshboard.db",
     },

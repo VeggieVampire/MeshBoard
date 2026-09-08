@@ -2,6 +2,7 @@ import os
 import logging
 import time
 from config import load_config, CONFIG_FILE
+from time_service import TimeSyncService
 
 try:
     from pubsub import pub
@@ -45,6 +46,7 @@ class Interface:
         self.handle_message = None  # Callback for message handling
         self.handle_position = None
         self._seen_packet_ids = []
+        self.time_sync = TimeSyncService(self.config.get("time_sync", {}))
 
     def _is_direct_text_packet(self, packet):
         to_id = packet.get("toId")
@@ -77,6 +79,7 @@ class Interface:
     def reload_config(self):
         if self.config_file and os.path.exists(self.config_file):
             self.config = load_config(self.config_file)
+            self.time_sync.config = self.config.get("time_sync", {})
         return self.config
 
     def configured_transports(self):
@@ -149,6 +152,8 @@ class Interface:
                 pub.subscribe(self.on_receive, "meshtastic.receive.text")
                 pub.subscribe(self.on_receive, "meshtastic.receive.position")
                 logger.info(f"Successfully connected to Meshtastic device using {transport}.")
+                if not self.time_sync.sync_from_host(self.interface):
+                    self.time_sync.sync_from_known_nodes(self.interface)
                 return
             except Exception as e:
                 logger.warning(f"Failed to connect using {transport}: {e}")
@@ -171,6 +176,7 @@ class Interface:
         """Handle incoming messages and telemetry data."""
         try:
             decoded = packet.get("decoded", {})
+            self.time_sync.sync_from_packet(interface or self.interface, packet)
             text = decoded.get("text", None)
             sender = packet.get("fromId", None)
             packet_id = packet.get("id")
@@ -229,13 +235,23 @@ class Interface:
         try:
             destination = int(user_id.lstrip("!"), 16)  # Remove `!` and convert to int
             for chunk in self.chunk_message(message):
-                self.interface.sendText(
+                def onAckNak(packet):
+                    routing = packet.get("decoded", {}).get("routing", {})
+                    error = routing.get("errorReason", "NONE")
+                    request_id = routing.get("requestId")
+                    if error == "NONE":
+                        logger.info("Reply ACK received from %s for packet %s", user_id, request_id)
+                    else:
+                        logger.warning("Reply NAK from %s for packet %s: %s", user_id, request_id, error)
+
+                sent_packet = self.interface.sendText(
                     chunk,
                     destinationId=destination,
                     wantAck=True,
+                    onResponse=onAckNak,
                     replyId=reply_id,
                 )
-                logger.info(f"Sent message to {user_id}")
+                logger.info("Queued reply to %s as packet %s", user_id, getattr(sent_packet, "id", "unknown"))
                 reply_id = None
                 delay = self.config["meshtastic"].get("chunk_delay_seconds", 0)
                 if delay:

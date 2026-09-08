@@ -4,6 +4,8 @@ Text-based Bulletin Board System (BBS) designed to run over a Meshtastic network
 
 MeshBoard runs on a Raspberry Pi or Linux host connected to a Meshtastic radio by USB serial, WiFi/TCP, or Bluetooth/BLE. Users send direct-message text commands to the MeshBoard node; MeshBoard replies with menus, games, store-and-forward mail, and GPS/location features without requiring internet access.
 
+MeshBoard also keeps the attached radio clock sane. On startup it sets the Meshtastic radio time from the host clock, and while running it can refresh the radio clock from plausible timestamps seen in nearby mesh packets. This prevents messages from showing as December 31, 1969 when the radio has fallen back to epoch zero.
+
 ## What It Does
 
 - Direct-message-only BBS commands. Broadcast text packets are ignored.
@@ -14,6 +16,7 @@ MeshBoard runs on a Raspberry Pi or Linux host connected to a Meshtastic radio b
 - USB serial first, with WiFi/TCP and Bluetooth/BLE fallback.
 - Chunked replies for long Meshtastic text responses.
 - ACK-requesting replies tagged with the incoming packet ID so clients can correlate responses.
+- Automatic Meshtastic radio time sync from the host clock and nearby mesh packet timestamps.
 
 ## Architecture
 
@@ -70,6 +73,15 @@ Example `meshtastic_config.json`:
         "max_text_length": 180,
         "chunk_delay_seconds": 0.5,
         "reconnect_delay_seconds": 10
+    },
+    "time_sync": {
+        "sync_on_startup": true,
+        "sync_from_host": true,
+        "sync_from_mesh": true,
+        "sync_interval_seconds": 3600,
+        "minimum_valid_epoch": 1704067200,
+        "maximum_future_seconds": 172800,
+        "allow_receive_time": false
     },
     "database": {
         "path": "meshboard.db"
@@ -151,6 +163,12 @@ Bluetooth/BLE example:
 ```
 
 On Linux, Bluetooth/BLE may require BlueZ support and local pairing. WiFi/TCP is usually the most reliable non-USB option for an unattended Pi when the radio and Pi stay on the same network.
+
+## Radio Time Sync
+
+MeshBoard sets the attached Meshtastic radio clock automatically when it connects. By default it uses the host computer or Pi time first, then falls back to cached nearby node position times if the host clock is not usable. While running, it refreshes from nearby mesh packet timestamps no more than once per hour.
+
+The time sync ignores timestamp zero and old packet times before January 1, 2024, so stale GPS packets do not drag the clock backward. By default, mesh-based sync uses explicit position or telemetry timestamps instead of local receive times. If a Pi or Linux host has reliable NTP, leave `sync_from_host` enabled. If you are running fully offline, leave `sync_from_mesh` enabled so the radio can learn time from neighboring nodes that already have a valid clock.
 
 ## Meshtastic Radio Setup
 
