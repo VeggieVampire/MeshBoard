@@ -5,6 +5,7 @@ telemetry_log.csv
 meshtastic_config.json
 admin_config.json
 admin_credentials.txt
+.admin_install_info
 wifi_remote.conf
 wifi-connect.log
 meshboard.db

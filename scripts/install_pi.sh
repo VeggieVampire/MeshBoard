@@ -6,6 +6,7 @@ SERVICE_NAME="${SERVICE_NAME:-meshboard.service}"
 ADMIN_USERNAME="${MESHBOARD_ADMIN_USERNAME:-sysop}"
 ADMIN_PASSWORD="${MESHBOARD_ADMIN_PASSWORD:-}"
 ADMIN_CREDENTIALS_FILE="${MESHBOARD_ADMIN_CREDENTIALS_FILE:-$APP_DIR/admin_credentials.txt}"
+ADMIN_INSTALL_INFO_FILE="${MESHBOARD_ADMIN_INSTALL_INFO_FILE:-$APP_DIR/.admin_install_info}"
 
 if [[ ! -f "bbs_system.py" ]]; then
     echo "Run this script from the MeshBoard repository root."
@@ -61,13 +62,13 @@ if [[ ! -f "$APP_DIR/wifi_remote.conf" && -f "$APP_DIR/wifi_remote.conf.example"
     echo "Created local $APP_DIR/wifi_remote.conf from wifi_remote.conf.example."
 fi
 
-"$APP_DIR/.venv/bin/python" - "$APP_DIR" "$ADMIN_USERNAME" "$ADMIN_PASSWORD" "$ADMIN_CREDENTIALS_FILE" <<'PY'
+"$APP_DIR/.venv/bin/python" - "$APP_DIR" "$ADMIN_USERNAME" "$ADMIN_PASSWORD" "$ADMIN_CREDENTIALS_FILE" "$ADMIN_INSTALL_INFO_FILE" <<'PY'
 import json
 import os
 import secrets
 import sys
 
-app_dir, username, password, credentials_file = sys.argv[1:5]
+app_dir, username, password, credentials_file, install_info_file = sys.argv[1:6]
 sys.path.insert(0, app_dir)
 
 from admin_server import make_password_hash
@@ -113,10 +114,25 @@ if generated_password:
         handle.write(f"MeshBoard Admin\nURL: http://<pi-ip>:8080\nUsername: {username}\nPassword: {password}\n")
     os.chmod(credentials_file, 0o600)
     print(f"Generated admin login saved to {credentials_file}")
+    password_status = "generated"
 elif needs_password_hash:
     print("Admin password was supplied with MESHBOARD_ADMIN_PASSWORD.")
+    password_status = "supplied"
 else:
     print("Existing admin password hash preserved.")
+    password_status = "preserved"
+
+with open(install_info_file, "w", encoding="utf-8") as handle:
+    install_info = {
+        "username": username,
+        "password_status": password_status,
+        "credentials_file": credentials_file,
+    }
+    if password_status in ("generated", "supplied"):
+        install_info["password"] = password
+    json.dump(install_info, handle)
+    handle.write("\n")
+os.chmod(install_info_file, 0o600)
 PY
 
 mkdir -p "$HOME/.config/systemd/user"
@@ -161,6 +177,68 @@ nohup env APP_DIR="$APP_DIR" "$APP_DIR/scripts/run_meshboard_forever.sh" >/dev/n
 nohup env APP_DIR="$APP_DIR" "$APP_DIR/scripts/run_admin_forever.sh" >/dev/null 2>&1 &
 nohup env APP_DIR="$APP_DIR" "$APP_DIR/scripts/run_wifi_connect_forever.sh" >/dev/null 2>&1 &
 
+pi_ips="$(hostname -I 2>/dev/null | tr ' ' '\n' | awk '/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ && $0 !~ /^169\.254\./ { print }' | paste -sd ' ' -)"
+admin_url="http://<pi-ip>:8080"
+first_ip="$(printf '%s\n' "$pi_ips" | awk '{ print $1 }')"
+if [[ -n "$first_ip" ]]; then
+    admin_url="http://$first_ip:8080"
+fi
+
+admin_username="$ADMIN_USERNAME"
+password_status="unknown"
+admin_password=""
+if [[ -f "$ADMIN_INSTALL_INFO_FILE" ]]; then
+    admin_username="$("$APP_DIR/.venv/bin/python" - "$ADMIN_INSTALL_INFO_FILE" "$ADMIN_USERNAME" <<'PY'
+import json
+import sys
+
+path, fallback = sys.argv[1:3]
+try:
+    with open(path, "r", encoding="utf-8") as handle:
+        print(json.load(handle).get("username") or fallback)
+except Exception:
+    print(fallback)
+PY
+)"
+    password_status="$("$APP_DIR/.venv/bin/python" - "$ADMIN_INSTALL_INFO_FILE" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as handle:
+        print(json.load(handle).get("password_status") or "unknown")
+except Exception:
+    print("unknown")
+PY
+)"
+    admin_password="$("$APP_DIR/.venv/bin/python" - "$ADMIN_INSTALL_INFO_FILE" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as handle:
+        print(json.load(handle).get("password") or "")
+except Exception:
+    print("")
+PY
+)"
+fi
+
 echo "Installed MeshBoard to $APP_DIR."
 echo "MeshBoard, the admin website, and the WiFi helper were installed at boot and started now."
 echo "Edit $APP_DIR/wifi_remote.conf later if you want the Pi to join a phone hotspot."
+echo
+echo "Admin website:"
+echo "  URL: $admin_url"
+if [[ -n "$pi_ips" ]]; then
+    echo "  Pi IPs: $pi_ips"
+fi
+echo "  Username: $admin_username"
+if [[ "$password_status" == "generated" || "$password_status" == "supplied" ]]; then
+    echo "  Password: $admin_password"
+elif [[ -f "$ADMIN_CREDENTIALS_FILE" ]]; then
+    echo "  Password: already configured; see $ADMIN_CREDENTIALS_FILE if this install generated it earlier."
+else
+    echo "  Password: already configured in $APP_DIR/admin_config.json"
+fi
+echo "  Saved login file: $ADMIN_CREDENTIALS_FILE"

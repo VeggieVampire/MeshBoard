@@ -51,12 +51,12 @@ The installer does the full default setup:
 - Installs Linux packages and Python dependencies.
 - Installs MeshBoard to `~/MeshBoard` unless `APP_DIR` is set.
 - Creates `meshtastic_config.json`, detecting USB when available and falling back to safe auto-connection defaults.
-- Creates `admin_config.json`, enables the admin website, generates a private admin password, and saves it to `admin_credentials.txt`.
+- Creates `admin_config.json`, enables the admin website, generates a private admin password, saves it to `admin_credentials.txt`, and prints the login details at the end.
 - Creates disabled `wifi_remote.conf` so hotspot access can be enabled later by editing one file.
 - Installs startup entries for MeshBoard, the admin website, and the WiFi helper.
 - Starts MeshBoard and the admin website immediately.
 
-After install, find the admin login on the Pi:
+After install, the script prints the admin URL, username, password, and config file locations. You can also find the generated admin login on the Pi:
 
 ```bash
 cat ~/MeshBoard/admin_credentials.txt
