@@ -226,6 +226,7 @@ class MeshBoardTests(unittest.TestCase):
             self.bbs.db.set_mail_listed(f"!node{index}", f"User{index}", True)
 
         response = Mail.process_command(user, "send", self.bbs)
+        self.assertIn("0. All", response)
         self.assertIn("1. nder", response)
         self.assertIn("9. Next", response)
         response = Mail.process_command(user, "9", self.bbs)
@@ -276,6 +277,45 @@ class MeshBoardTests(unittest.TestCase):
         deleted = Mail.process_command(recipient, "delete 1", self.bbs)
         self.assertIn("Archived message deleted", deleted)
         self.assertEqual([], self.bbs.db.archived_inbox(recipient))
+
+    def test_mail_only_shows_messages_for_current_user(self):
+        user = "!user"
+        other = "!other"
+        sender = "!sender"
+        self.bbs.db.set_mail_listed(user, "USER", True)
+        self.bbs.db.set_mail_listed(other, "OTHR", True)
+        self.bbs.db.set_mail_listed(sender, "SNDR", True)
+        self.bbs.db.send_message(sender, user, "for user only")
+        other_message_id = self.bbs.db.send_message(sender, other, "for other only")
+        self.bbs.db.soft_delete_message(other_message_id, other)
+
+        self.bbs.users[user] = {"menu": ["main"]}
+        inbox = Mail.process_command(user, "inbox", self.bbs)
+        self.assertIn("for user only", inbox)
+        self.assertNotIn("for other only", inbox)
+
+        archive = Mail.process_command(user, "archive", self.bbs)
+        self.assertNotIn("for other only", archive)
+
+    def test_mail_send_all_broadcasts_to_addressbook_contacts(self):
+        sender = "!sender"
+        first = "!first"
+        second = "!second"
+        self.bbs.db.set_mail_listed(sender, "SEND", True)
+        self.bbs.db.set_mail_listed(first, "ONE1", True)
+        self.bbs.db.set_mail_listed(second, "TWO2", True)
+        self.bbs.users[sender] = {"menu": ["main"]}
+
+        prompt = Mail.process_command(sender, "send", self.bbs)
+        self.assertIn("0. All", prompt)
+        body_prompt = Mail.process_command(sender, "0", self.bbs)
+        self.assertIn("To: All AddressBook contacts", body_prompt)
+        sent = Mail.process_command(sender, "Radio net at 7", self.bbs)
+
+        self.assertIn("Broadcast message saved for 2 contacts", sent)
+        self.assertEqual("Radio net at 7", self.bbs.db.inbox(first)[0]["body"])
+        self.assertEqual("Radio net at 7", self.bbs.db.inbox(second)[0]["body"])
+        self.assertEqual([], self.bbs.db.inbox(sender))
 
     def test_chunk_long_outgoing_messages(self):
         interface = Interface(test_config(self.db_path))

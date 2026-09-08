@@ -30,7 +30,7 @@ MeshBoard also keeps the attached radio clock sane. On startup it sets the Mesht
 - `database.py` initializes and accesses `meshboard.db`.
 - `admin_server.py` provides the local SysOp admin website.
 - `location_service.py` contains GPS freshness and Haversine helpers.
-- `modules/Mail/` provides inbox, send, AddressBook opt-in, reply, and archive flows.
+- `modules/Mail/` provides private inbox, send, AddressBook opt-in, reply, archive, and send-to-all flows.
 - `modules/MessageBoard/` provides public board categories and Events check-ins.
 - `modules/WhosBeenHere/` lists automatic recent users by last interaction time and command count.
 - `modules/Location/` provides What's Here, Drop Note, and Nearby Notes.
@@ -305,8 +305,8 @@ Common commands:
 Mail:
 
 - Open `Mail` from the main menu.
-- Use Inbox to read stored messages. Message detail uses `1. Reply`, `2. Archive`, and `3. Back`.
-- Use Send to choose an AddressBook contact and send a stored message.
+- Use Inbox to read stored messages addressed to your node only. Message detail uses `1. Reply`, `2. Archive`, and `3. Back`.
+- Use Send to choose an AddressBook contact and send a stored message. Choose `0. All` to save the message for every AddressBook contact except yourself.
 - Use Add AddressBook to make yourself selectable by others. Reply `YES` for the default 4-character ID, `NO` to cancel, or send any custom 4-character ID.
 - Messages persist in `meshboard.db`.
 

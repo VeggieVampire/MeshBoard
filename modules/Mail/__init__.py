@@ -3,6 +3,7 @@ import time
 
 menu_name = "Mail"
 PAGE_SIZE = 8
+ALL_RECIPIENTS = "__all__"
 
 
 def display_menu():
@@ -91,6 +92,8 @@ def _render_contacts(state, bbs_system):
         return "AddressBook is empty.\nAsk people to use Add AddressBook."
 
     lines = [f"Send - AddressBook {start + 1}-{end} of {len(contacts)}"]
+    if page == 0:
+        lines.append("0. All")
     for index, row in enumerate(contacts[start:end], start=1):
         lines.append(f"{index}. {row['display_name']}")
     if end < len(contacts):
@@ -100,6 +103,9 @@ def _render_contacts(state, bbs_system):
 
 
 def _contact_from_choice(command_clean, state, bbs_system):
+    if command_clean.lower() in ("0", "all"):
+        return ALL_RECIPIENTS
+
     if command_clean.startswith("!"):
         bbs_system.db.upsert_user(command_clean)
         return command_clean
@@ -184,11 +190,22 @@ def process_command(user_id, command, bbs_system):
             return _render_contacts(state, bbs_system)
         state["recipient_id"] = recipient
         state["state"] = "await_body"
+        if recipient == ALL_RECIPIENTS:
+            return "To: All AddressBook contacts\nEnter the message body:"
         return f"To: {bbs_system.db.display_name_for(recipient)}\nEnter the message body:"
 
     if state["state"] == "await_body":
         if not command_clean:
             return "Message body cannot be empty. Enter the message body:"
+        if state["recipient_id"] == ALL_RECIPIENTS:
+            contacts = [row for row in bbs_system.db.list_mail_contacts() if row["node_id"] != user_id]
+            if not contacts:
+                _reset_state(state)
+                return "No AddressBook contacts to send to.\n\n" + display_menu()
+            for row in contacts:
+                bbs_system.db.send_message(user_id, row["node_id"], command_clean)
+            _reset_state(state)
+            return f"Broadcast message saved for {len(contacts)} contacts."
         bbs_system.db.send_message(user_id, state["recipient_id"], command_clean)
         recipient = bbs_system.db.display_name_for(state["recipient_id"])
         _reset_state(state)
