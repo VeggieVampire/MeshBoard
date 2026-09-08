@@ -216,12 +216,11 @@ Create and enable the admin config:
 
 ```bash
 cd /home/osmc/MeshBoard
-cp admin_config.json.example admin_config.json
 .venv/bin/python admin_server.py --hash-password
 vi admin_config.json
 ```
 
-Set `enabled` to `true`, keep `username` as `sysop` or change it, paste the generated hash into `password_hash`, and change `session_secret` to any long random text.
+The installer creates `admin_config.json` from `admin_config.json.example` if it does not already exist. Set `enabled` to `true`, keep `username` as `sysop` or change it, paste the generated hash into `password_hash`, and change `session_secret` to any long random text.
 
 Install the admin website at boot:
 

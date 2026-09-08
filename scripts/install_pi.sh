@@ -26,12 +26,21 @@ if [[ "$SOURCE_DIR" != "$TARGET_DIR" ]]; then
         --exclude ".venv" \
         --exclude "meshboard.db" \
         --exclude "meshtastic_config.json" \
+        --exclude "admin_config.json" \
+        --exclude "wifi_remote.conf" \
+        --exclude "wifi-connect.log" \
         ./ "$APP_DIR/"
 fi
 
 python3 -m venv "$APP_DIR/.venv"
 "$APP_DIR/.venv/bin/python" -m pip install --upgrade pip
 "$APP_DIR/.venv/bin/python" -m pip install meshtastic
+
+if [[ ! -f "$APP_DIR/admin_config.json" && -f "$APP_DIR/admin_config.json.example" ]]; then
+    cp "$APP_DIR/admin_config.json.example" "$APP_DIR/admin_config.json"
+    chmod 600 "$APP_DIR/admin_config.json"
+    echo "Created local $APP_DIR/admin_config.json from admin_config.json.example."
+fi
 
 mkdir -p "$HOME/.config/systemd/user"
 cp "$APP_DIR/systemd/meshboard.service" "$HOME/.config/systemd/user/$SERVICE_NAME"
@@ -48,5 +57,5 @@ echo "Installed MeshBoard to $APP_DIR."
 echo "Run 'cd $APP_DIR && .venv/bin/python setup.py' to detect USB, or edit meshtastic_config.json for WiFi/Bluetooth."
 echo "For offline/headless Pi installs without systemd linger, use scripts/run_meshboard_forever.sh with cron @reboot."
 echo "For remote hotspot fallback, copy wifi_remote.conf.example to wifi_remote.conf, edit it, and run scripts/run_wifi_connect_forever.sh from cron @reboot."
-echo "For the local SysOp admin website, copy admin_config.json.example to admin_config.json, set a password hash, and run scripts/run_admin_forever.sh from cron @reboot."
+echo "For the local SysOp admin website, edit admin_config.json, set a password hash, and run scripts/run_admin_forever.sh from cron @reboot."
 echo "Then start with: systemctl --user start $SERVICE_NAME"
