@@ -32,7 +32,8 @@ class Database:
                     mail_listed INTEGER NOT NULL DEFAULT 0,
                     first_seen INTEGER NOT NULL,
                     last_seen INTEGER NOT NULL,
-                    command_count INTEGER NOT NULL DEFAULT 0
+                    command_count INTEGER NOT NULL DEFAULT 0,
+                    last_mail_check_at INTEGER
                 );
 
                 CREATE TABLE IF NOT EXISTS address_book (
@@ -104,6 +105,8 @@ class Database:
                 conn.execute("ALTER TABLE users ADD COLUMN mail_listed INTEGER NOT NULL DEFAULT 0")
             if "command_count" not in columns:
                 conn.execute("ALTER TABLE users ADD COLUMN command_count INTEGER NOT NULL DEFAULT 0")
+            if "last_mail_check_at" not in columns:
+                conn.execute("ALTER TABLE users ADD COLUMN last_mail_check_at INTEGER")
 
     def upsert_user(self, node_id, display_name=None, seen_at=None):
         seen_at = int(seen_at or time.time())
@@ -143,6 +146,15 @@ class Database:
     def get_user(self, node_id):
         with self.connect() as conn:
             return conn.execute("SELECT * FROM users WHERE node_id = ?", (node_id,)).fetchone()
+
+    def mark_mail_checked(self, node_id, checked_at=None):
+        checked_at = int(checked_at or time.time())
+        self.upsert_user(node_id, seen_at=checked_at)
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE users SET last_mail_check_at = ? WHERE node_id = ?",
+                (checked_at, node_id),
+            )
 
     def list_users(self):
         with self.connect() as conn:

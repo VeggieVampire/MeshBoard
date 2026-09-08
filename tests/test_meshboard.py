@@ -278,6 +278,24 @@ class MeshBoardTests(unittest.TestCase):
         self.assertIn("Archived message deleted", deleted)
         self.assertEqual([], self.bbs.db.archived_inbox(recipient))
 
+    def test_mail_inbox_records_check_time_and_marks_unread_with_star(self):
+        sender = "!sender"
+        recipient = "!recipient"
+        self.bbs.db.set_mail_listed(sender, "SNDR", True)
+        self.bbs.db.set_mail_listed(recipient, "RCPT", True)
+        self.bbs.db.send_message(sender, recipient, "Unread note")
+
+        self.bbs.users[recipient] = {"menu": ["main"]}
+        before = int(time.time())
+        inbox = Mail.process_command(recipient, "inbox", self.bbs)
+        after = int(time.time())
+        user = self.bbs.db.get_user(recipient)
+
+        self.assertIn("1. * SNDR", inbox)
+        self.assertGreaterEqual(user["last_mail_check_at"], before)
+        self.assertLessEqual(user["last_mail_check_at"], after)
+        self.assertEqual(1, self.bbs.db.unread_count(recipient))
+
     def test_mail_only_shows_messages_for_current_user(self):
         user = "!user"
         other = "!other"

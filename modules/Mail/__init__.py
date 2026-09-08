@@ -53,6 +53,7 @@ def _validate_simple_id(command_clean):
 
 
 def _render_inbox(user_id, bbs_system):
+    bbs_system.db.mark_mail_checked(user_id)
     messages = bbs_system.db.inbox(user_id)
     unread = sum(1 for msg in messages if msg["read_at"] is None)
     if not messages:

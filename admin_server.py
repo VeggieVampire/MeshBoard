@@ -435,7 +435,7 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
     def show_users(self):
         with db_connect(self.config) as conn:
             rows = conn.execute("SELECT * FROM users ORDER BY last_seen DESC LIMIT 200").fetchall()
-        body = "<table><tr><th>User</th><th>Node</th><th>AddressBook</th><th>Commands</th><th>First Interaction</th><th>Last Interaction</th><th></th></tr>"
+        body = "<table><tr><th>User</th><th>Node</th><th>AddressBook</th><th>Commands</th><th>First Interaction</th><th>Last Interaction</th><th>Checked Mail</th><th></th></tr>"
         for row in rows:
             addressbook = row["display_name"] if row["mail_listed"] and row["display_name"] else "No"
             user_name = row["display_name"] or row["node_id"]
@@ -444,6 +444,7 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
                 f"<tr><td>{esc(user_name)}</td><td>{esc(row['node_id'])}</td>"
                 f"<td>{esc(addressbook)}</td><td>{row['command_count']}</td>"
                 f"<td>{fmt_time(row['first_seen'])}</td><td>{fmt_time(row['last_seen'])}</td>"
+                f"<td>{fmt_time(row['last_mail_check_at'])}</td>"
                 f"<td>{link_button(edit_path, 'Edit')} {form_button('/delete-user', {'node_id': row['node_id']}, 'Delete')}</td></tr>"
             )
         body += "</table>"

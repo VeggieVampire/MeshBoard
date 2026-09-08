@@ -128,6 +128,7 @@ class AdminServerTests(unittest.TestCase):
             db.record_user_command("!cabn", "CABN")
             db.record_user_command("!cabn")
             db.record_user_command("!raw")
+            db.mark_mail_checked("!cabn", 1788830000)
             config = {
                 "host": "127.0.0.1",
                 "port": 0,
@@ -155,9 +156,11 @@ class AdminServerTests(unittest.TestCase):
                 self.assertIn("<th>Commands</th>", users)
                 self.assertIn("<th>First Interaction</th>", users)
                 self.assertIn("<th>Last Interaction</th>", users)
+                self.assertIn("<th>Checked Mail</th>", users)
                 self.assertIn("CABN", users)
                 self.assertIn("!cabn", users)
                 self.assertIn("!raw", users)
+                self.assertIn("2026-09-08", users)
                 self.assertIn("<td>No</td>", users)
                 self.assertIn("<td>2</td>", users)
 

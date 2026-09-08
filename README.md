@@ -305,7 +305,7 @@ Common commands:
 Mail:
 
 - Open `Mail` from the main menu.
-- Use Inbox to read stored messages addressed to your node only. Message detail uses `1. Reply`, `2. Archive`, and `3. Back`.
+- Use Inbox to read stored messages addressed to your node only. New/unread messages have `*` beside them. MeshBoard records when each user last checked mail. Message detail uses `1. Reply`, `2. Archive`, and `3. Back`.
 - Use Send to choose an AddressBook contact and send a stored message. Choose `0. All` to save the message for every AddressBook contact except yourself.
 - Use Add AddressBook to make yourself selectable by others. Reply `YES` for the default 4-character ID, `NO` to cancel, or send any custom 4-character ID.
 - Messages persist in `meshboard.db`.
@@ -385,7 +385,7 @@ python -m unittest discover -s tests
 
 `meshboard.db` is created automatically. Tables:
 
-- `users(node_id, display_name, mail_listed, first_seen, last_seen, command_count)`
+- `users(node_id, display_name, mail_listed, first_seen, last_seen, command_count, last_mail_check_at)`
 - `address_book(owner_id, node_id, display_name, created_at, updated_at)`
 - `messages(id, sender_id, recipient_id, body, created_at, read_at, deleted_by_sender, deleted_by_recipient)`
 - `locations(id, creator_id, creator_name, latitude, longitude, altitude, body, created_at, updated_at, deleted, visibility)`
