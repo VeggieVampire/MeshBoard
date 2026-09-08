@@ -29,7 +29,7 @@ DEFAULT_CONFIG = {
     },
     "time_sync": {
         "sync_on_startup": True,
-        "sync_from_host": True,
+        "sync_from_host": False,
         "sync_from_mesh": True,
         "sync_interval_seconds": 3600,
         "minimum_valid_epoch": 1704067200,

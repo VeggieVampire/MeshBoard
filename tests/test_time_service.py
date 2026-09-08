@@ -47,10 +47,17 @@ class TimeSyncServiceTests(unittest.TestCase):
 
     def test_syncs_radio_from_host_clock(self):
         mesh_interface = FakeMeshInterface()
-        service = TimeSyncService(clock=lambda: 1788830000)
+        service = TimeSyncService({"sync_from_host": True}, clock=lambda: 1788830000)
 
         self.assertTrue(service.sync_from_host(mesh_interface))
         self.assertEqual([1788830000], mesh_interface.localNode.times)
+
+    def test_host_clock_sync_is_opt_in(self):
+        mesh_interface = FakeMeshInterface()
+        service = TimeSyncService(clock=lambda: 1788830000)
+
+        self.assertFalse(service.sync_from_host(mesh_interface))
+        self.assertEqual([], mesh_interface.localNode.times)
 
     def test_syncs_radio_from_mesh_packet_and_throttles(self):
         mesh_interface = FakeMeshInterface()

@@ -5,6 +5,17 @@ import time
 logger = logging.getLogger(__name__)
 
 
+DEFAULT_TIME_SYNC = {
+    "sync_on_startup": True,
+    "sync_from_host": False,
+    "sync_from_mesh": True,
+    "sync_interval_seconds": 3600,
+    "minimum_valid_epoch": 1704067200,
+    "maximum_future_seconds": 172800,
+    "allow_receive_time": False,
+}
+
+
 class TimeSyncService:
     """Keeps the attached Meshtastic radio clock away from epoch zero."""
 
@@ -14,19 +25,19 @@ class TimeSyncService:
         self.last_sync_at = None
 
     def enabled(self, key):
-        return bool(self.config.get(key, True))
+        return bool(self.config.get(key, DEFAULT_TIME_SYNC.get(key, True)))
 
     def sync_interval(self):
-        return int(self.config.get("sync_interval_seconds", 3600))
+        return int(self.config.get("sync_interval_seconds", DEFAULT_TIME_SYNC["sync_interval_seconds"]))
 
     def minimum_valid_epoch(self):
-        return int(self.config.get("minimum_valid_epoch", 1704067200))
+        return int(self.config.get("minimum_valid_epoch", DEFAULT_TIME_SYNC["minimum_valid_epoch"]))
 
     def maximum_future_seconds(self):
-        return int(self.config.get("maximum_future_seconds", 172800))
+        return int(self.config.get("maximum_future_seconds", DEFAULT_TIME_SYNC["maximum_future_seconds"]))
 
     def allow_receive_time(self):
-        return bool(self.config.get("allow_receive_time", False))
+        return bool(self.config.get("allow_receive_time", DEFAULT_TIME_SYNC["allow_receive_time"]))
 
     def is_reasonable_timestamp(self, timestamp):
         try:

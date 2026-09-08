@@ -76,7 +76,7 @@ Example `meshtastic_config.json`:
     },
     "time_sync": {
         "sync_on_startup": true,
-        "sync_from_host": true,
+        "sync_from_host": false,
         "sync_from_mesh": true,
         "sync_interval_seconds": 3600,
         "minimum_valid_epoch": 1704067200,
@@ -166,9 +166,9 @@ On Linux, Bluetooth/BLE may require BlueZ support and local pairing. WiFi/TCP is
 
 ## Radio Time Sync
 
-MeshBoard sets the attached Meshtastic radio clock automatically when it connects. By default it uses the host computer or Pi time first, then falls back to cached nearby node position times if the host clock is not usable. While running, it refreshes from nearby mesh packet timestamps no more than once per hour.
+MeshBoard sets the attached Meshtastic radio clock from the mesh by default. On startup it checks cached nearby node position times, and while running it refreshes from nearby mesh packet timestamps no more than once per hour.
 
-The time sync ignores timestamp zero and old packet times before January 1, 2024, so stale GPS packets do not drag the clock backward. By default, mesh-based sync uses explicit position or telemetry timestamps instead of local receive times. If a Pi or Linux host has reliable NTP, leave `sync_from_host` enabled. If you are running fully offline, leave `sync_from_mesh` enabled so the radio can learn time from neighboring nodes that already have a valid clock.
+The time sync ignores timestamp zero and old packet times before January 1, 2024, so stale GPS packets do not drag the clock backward. By default, mesh-based sync uses explicit position or telemetry timestamps instead of local receive times. Leave `sync_from_host` disabled for offline Pi installs because a Pi without RTC or internet can boot with the wrong clock. Enable `sync_from_host` only when the host has a reliable RTC or NTP.
 
 ## Meshtastic Radio Setup
 
