@@ -55,3 +55,49 @@ class AdminServerTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=5)
+
+    def test_board_category_submenu_filters_and_deletes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "meshboard.db")
+            db = Database(db_path)
+            db.set_display_name("!author", "CABN")
+            news_id = db.create_board_post("news", "!author", "road is clear")
+            db.create_board_post("trade", "!seller", "extra batteries")
+            config = {
+                "host": "127.0.0.1",
+                "port": 0,
+                "username": "sysop",
+                "password_hash": make_password_hash("secret"),
+                "session_secret": "test-secret",
+                "database": {"path": db_path},
+            }
+            server = ThreadingHTTPServer(("127.0.0.1", 0), AdminHandler)
+            server.config = config
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base = f"http://127.0.0.1:{server.server_address[1]}"
+                opener = build_opener(HTTPCookieProcessor(CookieJar()))
+                login_data = urlencode({"username": "sysop", "password": "secret"}).encode("utf-8")
+                with opener.open(Request(f"{base}/login", data=login_data, method="POST")):
+                    pass
+
+                with opener.open(f"{base}/board?category=news") as response:
+                    board = response.read().decode("utf-8")
+                self.assertIn("Local News", board)
+                self.assertIn("road is clear", board)
+                self.assertIn("CABN", board)
+                self.assertNotIn("extra batteries", board)
+
+                delete_data = urlencode({"id": str(news_id), "category": "news"}).encode("utf-8")
+                with opener.open(Request(f"{base}/delete-board", data=delete_data, method="POST")) as response:
+                    redirected = response.geturl()
+
+                self.assertIn("/board?deleted=1&category=news", redirected)
+                with opener.open(f"{base}/board?category=news") as response:
+                    board = response.read().decode("utf-8")
+                self.assertNotIn("road is clear", board)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)

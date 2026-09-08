@@ -17,6 +17,14 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.environ.get("MESHBOARD_ADMIN_CONFIG", os.path.join(APP_DIR, "admin_config.json"))
 SESSION_COOKIE = "meshboard_admin"
 SESSION_MAX_AGE = 12 * 60 * 60
+BOARD_CATEGORIES = [
+    ("general", "General Discussion"),
+    ("news", "Local News"),
+    ("trade", "Buy / Sell / Trade"),
+    ("events", "Events"),
+    ("rumors", "Rumors & Gossip"),
+    ("header", "Main Menu Header"),
+]
 
 
 def load_config(path=CONFIG_PATH):
@@ -191,6 +199,9 @@ button {{ cursor: pointer; }}
 .danger {{ background: #5f1f2a; border-color: #8a2e3d; }}
 .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }}
 .card {{ background: #151f2d; border: 1px solid #2d3a4d; border-radius: 8px; padding: 12px; }}
+.tabs {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }}
+.tabs a {{ background: #151f2d; color: #e6edf3; border: 1px solid #38475b; border-radius: 6px; padding: 8px 10px; text-decoration: none; }}
+.tabs a.active {{ background: #2d415d; border-color: #5b779b; }}
 .muted {{ color: #9fb0c3; }}
 table {{ width: 100%; border-collapse: collapse; background: #151f2d; }}
 th, td {{ padding: 8px; border-bottom: 1px solid #2d3a4d; text-align: left; vertical-align: top; }}
@@ -254,7 +265,10 @@ input {{ width: 100%; box-sizing: border-box; padding: 10px; margin: 6px 0 12px;
                 self.redirect("/messages?deleted=1")
             elif action == "/delete-board":
                 self.mark_deleted("board_posts", data.get("id"))
-                self.redirect("/board?deleted=1")
+                query = {"deleted": "1"}
+                if data.get("category"):
+                    query["category"] = data["category"]
+                self.redirect("/board?" + urlencode(query))
             elif action == "/delete-location":
                 self.mark_deleted("locations", data.get("id"))
                 self.redirect("/locations?deleted=1")
@@ -336,19 +350,67 @@ input {{ width: 100%; box-sizing: border-box; padding: 10px; margin: 6px 0 12px;
         self.send_html("Mail", body)
 
     def show_board(self):
+        selected_category = self.query_value("category")
+        valid_categories = {category for category, _ in BOARD_CATEGORIES}
+        if selected_category not in valid_categories:
+            selected_category = ""
         with db_connect(self.config) as conn:
-            rows = conn.execute(
-                "SELECT * FROM board_posts WHERE deleted = 0 ORDER BY created_at DESC, id DESC LIMIT 300"
+            count_rows = conn.execute(
+                """
+                SELECT category, COUNT(*) AS count
+                FROM board_posts
+                WHERE deleted = 0
+                GROUP BY category
+                """
             ).fetchall()
-        body = "<table><tr><th>ID</th><th>Category</th><th>Author</th><th>When</th><th>Body</th><th></th></tr>"
+            counts = {row["category"]: row["count"] for row in count_rows}
+            params = []
+            where = "WHERE board_posts.deleted = 0"
+            if selected_category:
+                where += " AND board_posts.category = ?"
+                params.append(selected_category)
+            rows = conn.execute(
+                f"""
+                SELECT board_posts.*, COALESCE(users.display_name, board_posts.author_id) AS author_name
+                FROM board_posts
+                LEFT JOIN users ON users.node_id = board_posts.author_id
+                {where}
+                ORDER BY board_posts.created_at DESC, board_posts.id DESC
+                LIMIT 300
+                """,
+                params,
+            ).fetchall()
+        total = sum(counts.values())
+        all_class = "active" if not selected_category else ""
+        body = f"<div class='tabs'><a class='{all_class}' href='/board'>All ({total})</a>"
+        for category, label in BOARD_CATEGORIES:
+            klass = "active" if selected_category == category else ""
+            body += f"<a class='{klass}' href='/board?category={esc(category)}'>{esc(label)} ({counts.get(category, 0)})</a>"
+        body += "</div>"
+        if selected_category:
+            label = dict(BOARD_CATEGORIES)[selected_category]
+            body += f"<h2>{esc(label)}</h2>"
+        body += "<table><tr><th>ID</th><th>Category</th><th>Author</th><th>When</th><th>Body</th><th></th></tr>"
         for row in rows:
             body += (
-                f"<tr><td>{row['id']}</td><td>{esc(row['category'])}</td><td>{esc(row['author_id'])}</td>"
+                f"<tr><td>{row['id']}</td><td>{esc(self.board_category_label(row['category']))}</td><td>{esc(row['author_name'])}</td>"
                 f"<td>{fmt_time(row['created_at'])}</td><td>{esc(clip(row['body']))}</td>"
-                f"<td>{form_button('/delete-board', {'id': row['id']}, 'Delete')}</td></tr>"
+                f"<td>{form_button('/delete-board', {'id': row['id'], 'category': selected_category}, 'Delete')}</td></tr>"
             )
+        if not rows:
+            body += "<tr><td colspan='6'>No posts in this board.</td></tr>"
         body += "</table>"
         self.send_html("Board", body)
+
+    def query_value(self, name):
+        query = ""
+        if "?" in self.path:
+            query = self.path.split("?", 1)[1]
+        values = parse_qs(query).get(name)
+        return values[-1] if values else ""
+
+    def board_category_label(self, category):
+        return dict(BOARD_CATEGORIES).get(category, category)
 
     def show_locations(self):
         with db_connect(self.config) as conn:
