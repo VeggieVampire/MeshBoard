@@ -3,6 +3,9 @@ __pycache__/
 listener.log
 telemetry_log.csv
 meshtastic_config.json
+admin_config.json
+wifi_remote.conf
+wifi-connect.log
 meshboard.db
 local-com5-*.yaml
 *-radio.yaml
