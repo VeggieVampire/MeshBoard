@@ -56,12 +56,13 @@ class AdminServerTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=5)
 
-    def test_users_page_shows_command_count(self):
+    def test_users_page_shows_recent_activity_details(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "meshboard.db")
             db = Database(db_path)
             db.record_user_command("!cabn", "CABN")
             db.record_user_command("!cabn")
+            db.record_user_command("!raw")
             config = {
                 "host": "127.0.0.1",
                 "port": 0,
@@ -83,7 +84,16 @@ class AdminServerTests(unittest.TestCase):
 
                 with opener.open(f"{base}/users") as response:
                     users = response.read().decode("utf-8")
+                self.assertIn("Users", users)
+                self.assertIn("<th>User</th>", users)
+                self.assertIn("<th>AddressBook</th>", users)
                 self.assertIn("<th>Commands</th>", users)
+                self.assertIn("<th>First Interaction</th>", users)
+                self.assertIn("<th>Last Interaction</th>", users)
+                self.assertIn("CABN", users)
+                self.assertIn("!cabn", users)
+                self.assertIn("!raw", users)
+                self.assertIn("<td>No</td>", users)
                 self.assertIn("<td>2</td>", users)
             finally:
                 server.shutdown()

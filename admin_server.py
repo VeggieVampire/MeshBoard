@@ -349,11 +349,14 @@ input {{ width: 100%; box-sizing: border-box; padding: 10px; margin: 6px 0 12px;
     def show_users(self):
         with db_connect(self.config) as conn:
             rows = conn.execute("SELECT * FROM users ORDER BY last_seen DESC LIMIT 200").fetchall()
-        body = "<table><tr><th>Name</th><th>Node</th><th>Mail</th><th>Commands</th><th>Last Seen</th><th></th></tr>"
+        body = "<table><tr><th>User</th><th>Node</th><th>AddressBook</th><th>Commands</th><th>First Interaction</th><th>Last Interaction</th><th></th></tr>"
         for row in rows:
+            addressbook = row["display_name"] if row["mail_listed"] and row["display_name"] else "No"
+            user_name = row["display_name"] or row["node_id"]
             body += (
-                f"<tr><td>{esc(row['display_name'])}</td><td>{esc(row['node_id'])}</td>"
-                f"<td>{'Yes' if row['mail_listed'] else 'No'}</td><td>{row['command_count']}</td><td>{fmt_time(row['last_seen'])}</td>"
+                f"<tr><td>{esc(user_name)}</td><td>{esc(row['node_id'])}</td>"
+                f"<td>{esc(addressbook)}</td><td>{row['command_count']}</td>"
+                f"<td>{fmt_time(row['first_seen'])}</td><td>{fmt_time(row['last_seen'])}</td>"
                 f"<td>{form_button('/delete-user', {'node_id': row['node_id']}, 'Delete')}</td></tr>"
             )
         body += "</table>"
