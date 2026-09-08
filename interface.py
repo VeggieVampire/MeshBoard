@@ -192,7 +192,7 @@ class Interface:
                 if not self._is_direct_text_packet(packet):
                     logger.info("Ignoring non-direct text message from %s", sender)
                     return
-                logger.info(f"Message received from {sender}")
+                logger.info("Message received from %s: %r", sender, text)
                 if self.handle_message:
                     response = self.handle_message(sender, text)
                     if response:
@@ -252,6 +252,7 @@ class Interface:
                     replyId=reply_id,
                 )
                 logger.info("Queued reply to %s as packet %s", user_id, getattr(sent_packet, "id", "unknown"))
+                logger.info("Reply text to %s: %r", user_id, chunk)
                 reply_id = None
                 delay = self.config["meshtastic"].get("chunk_delay_seconds", 0)
                 if delay:

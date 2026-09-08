@@ -152,28 +152,27 @@ class BBSSystem:
         """
         Process commands based on the user's current menu.
         """
+        command_clean = command.strip()
+        command_lower = command_clean.lower()
         current_menu = self.users[user_id]["menu"][-1]  # Get the current menu from the stack
 
-        # Check if a module has taken control
-        if "module_control" in self.users[user_id]:
-            module = self.users[user_id]["module_control"]
-            if command.strip().lower() == "cd ..":  # Exit the module and return to the menu
-                del self.users[user_id]["module_control"]
-                return self.display_menu(user_id)
-            else:
-                # Forward command to the module
-                return module.process_command(user_id, command, self)
-
-        # Handle global navigation commands
-        if command.strip().lower() == "top":  # Go back to the main menu
+        # Handle global navigation commands before module-specific handlers.
+        if command_lower == "top":  # Go back to the main menu
             self.users[user_id]["menu"] = ["main"]
+            self.users[user_id].pop("module_control", None)
             return self.display_menu(user_id)
-        elif command.strip().lower() == "cd ..":  # Go back one menu level
+        elif command_lower == "cd ..":  # Go back one menu level
+            self.users[user_id].pop("module_control", None)
             if len(self.users[user_id]["menu"]) > 1:
                 self.users[user_id]["menu"].pop()  # Remove the last menu
                 return self.display_menu(user_id)
             else:
                 return "You are already at the main menu."
+
+        # Check if a module has taken control
+        if "module_control" in self.users[user_id]:
+            module = self.users[user_id]["module_control"]
+            return module.process_command(user_id, command, self)
 
         # Handle menu-specific commands
         if current_menu == "main":

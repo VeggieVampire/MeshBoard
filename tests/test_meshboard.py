@@ -79,6 +79,15 @@ class MeshBoardTests(unittest.TestCase):
         reopened = Database(self.db_path)
         self.assertEqual(1, len(reopened.active_locations()))
 
+    def test_location_menu_only_has_location_tools(self):
+        menu = location_command("!abc12345", "menu", self.bbs)
+
+        self.assertIn("1. What's Here?", menu)
+        self.assertIn("2. Drop Note", menu)
+        self.assertIn("3. Nearby Notes", menu)
+        self.assertNotIn("My Saved", menu)
+        self.assertNotIn("Hot Cold", menu)
+
     def test_whats_here_radius_and_nearby_sorting(self):
         user = "!abc12345"
         self.bbs.update_node_location(user, {"latitude": 35.0, "longitude": -97.0})
@@ -92,6 +101,22 @@ class MeshBoardTests(unittest.TestCase):
 
         nearby = location_command(user, "3", self.bbs)
         self.assertLess(nearby.index("Close note"), nearby.index("Far note"))
+
+        detail = location_command(user, "1", self.bbs)
+        self.assertIn("Lat 35.000100", detail)
+        self.assertIn("Lon -97.000000", detail)
+        self.assertIn("Reply BACK", detail)
+
+    def test_await_note_does_not_save_menu_numbers(self):
+        user = "!abc12345"
+        self.bbs.update_node_location(user, {"latitude": 35.0, "longitude": -97.0})
+        self.bbs.users[user] = {"menu": ["main"]}
+        self.assertIn("Enter the message", location_command(user, "2", self.bbs))
+
+        response = location_command(user, "1", self.bbs)
+
+        self.assertIn("Still waiting", response)
+        self.assertEqual([], self.bbs.db.active_locations())
 
     def test_send_mail_inbox_read_and_reopen(self):
         self.bbs.db.upsert_user("!sender", "Sender")
@@ -111,6 +136,18 @@ class MeshBoardTests(unittest.TestCase):
         response = self.bbs.handle_message("!newuser", "hello")
         self.assertIn("Main Menu", response)
         self.assertIn("Invalid", response)
+
+    def test_top_returns_to_main_menu_from_module_control(self):
+        user = "!abc12345"
+        self.bbs.handle_message(user, "top")
+        self.bbs.handle_message(user, "1")
+
+        response = self.bbs.handle_message(user, "Top")
+
+        self.assertIn("Main Menu", response)
+        self.assertNotIn("Invalid", response)
+        self.assertNotIn("module_control", self.bbs.users[user])
+        self.assertEqual(["main"], self.bbs.users[user]["menu"])
 
     def test_chunk_long_outgoing_messages(self):
         interface = Interface(test_config(self.db_path))
