@@ -134,6 +134,18 @@ By default it installs to `~/MeshBoard`. Override the destination with:
 APP_DIR="$HOME/apps/MeshBoard" scripts/install_pi.sh
 ```
 
+## Offline Headless Startup
+
+A Pi without internet usually also has no reliable clock, and a user systemd service can stop when the SSH/login session ends unless linger is enabled. If you cannot enable linger with `sudo loginctl enable-linger "$USER"`, use the no-sudo cron launcher:
+
+```bash
+chmod +x scripts/run_meshboard_forever.sh
+(crontab -l 2>/dev/null; echo '@reboot APP_DIR=$HOME/MeshBoard $HOME/MeshBoard/scripts/run_meshboard_forever.sh') | crontab -
+nohup "$HOME/MeshBoard/scripts/run_meshboard_forever.sh" >/dev/null 2>&1 &
+```
+
+The launcher uses `/tmp/meshboard.lock` so a second copy exits instead of fighting for the USB radio. Logs still go to `listener.log`.
+
 ## Connection Options
 
 Set `connection_type` to:

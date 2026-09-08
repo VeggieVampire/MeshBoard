@@ -46,4 +46,5 @@ systemctl --user enable "$SERVICE_NAME"
 
 echo "Installed MeshBoard to $APP_DIR."
 echo "Run 'cd $APP_DIR && .venv/bin/python setup.py' to detect USB, or edit meshtastic_config.json for WiFi/Bluetooth."
+echo "For offline/headless Pi installs without systemd linger, use scripts/run_meshboard_forever.sh with cron @reboot."
 echo "Then start with: systemctl --user start $SERVICE_NAME"
