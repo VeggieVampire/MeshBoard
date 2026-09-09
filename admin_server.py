@@ -23,6 +23,7 @@ from database import Database
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.environ.get("MESHBOARD_ADMIN_CONFIG", os.path.join(APP_DIR, "admin_config.json"))
 MESH_CONFIG_PATH = os.environ.get("MESHBOARD_CONFIG", os.path.join(APP_DIR, mesh_config.CONFIG_FILE))
+WIFI_REMOTE_CONFIG_PATH = os.environ.get("MESHBOARD_WIFI_REMOTE_CONFIG", os.path.join(APP_DIR, "wifi_remote.conf"))
 SESSION_COOKIE = "meshboard_admin"
 SESSION_MAX_AGE = 12 * 60 * 60
 BOARD_CATEGORIES = [
@@ -94,6 +95,104 @@ def resolve_mesh_config_path(config):
     if not os.path.isabs(path):
         path = os.path.join(APP_DIR, path)
     return path
+
+
+def resolve_wifi_remote_config_path(config):
+    path = config.get("wifi_remote_config_path", WIFI_REMOTE_CONFIG_PATH)
+    if not os.path.isabs(path):
+        path = os.path.join(APP_DIR, path)
+    return path
+
+
+def parse_shell_config(path):
+    parsed = {}
+    if not os.path.exists(path):
+        return parsed
+    pattern = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$")
+    with open(path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            match = pattern.match(line)
+            if not match:
+                continue
+            key, value = match.groups()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                value = value[1:-1]
+            parsed[key] = value
+    return parsed
+
+
+def truthy_value(value, fallback=False):
+    if value is None:
+        return fallback
+    return str(value).strip().lower() in ("1", "true", "yes", "y", "on")
+
+
+def load_wifi_remote_config(path):
+    raw = parse_shell_config(path)
+    hotspots = []
+    for index in range(1, 6):
+        prefix = f"HOTSPOT_{index}_"
+        ssid = raw.get(prefix + "SSID", "")
+        psk = raw.get(prefix + "PSK", "")
+        if ssid or psk:
+            hotspots.append(
+                {
+                    "enabled": truthy_value(raw.get(prefix + "ENABLED"), True),
+                    "ssid": ssid,
+                    "psk": psk,
+                }
+            )
+    if not hotspots and (raw.get("SSID") or raw.get("PSK")):
+        hotspots.append(
+            {
+                "enabled": truthy_value(raw.get("HOTSPOT_1_ENABLED"), True),
+                "ssid": raw.get("SSID", ""),
+                "psk": raw.get("PSK", ""),
+            }
+        )
+    while len(hotspots) < 5:
+        hotspots.append({"enabled": len(hotspots) == 0, "ssid": "", "psk": ""})
+    return {
+        "enabled": truthy_value(raw.get("ENABLED"), False),
+        "interface": raw.get("INTERFACE", "auto") or "auto",
+        "connection_name": raw.get("CONNECTION_NAME", "MeshBoardRemoteHotspot") or "MeshBoardRemoteHotspot",
+        "connect_only_when_offline": truthy_value(raw.get("CONNECT_ONLY_WHEN_OFFLINE"), True),
+        "prefer_visible_hotspot": truthy_value(raw.get("PREFER_VISIBLE_HOTSPOT"), True),
+        "check_interval_seconds": int(raw.get("CHECK_INTERVAL_SECONDS", "60") or 60),
+        "hotspots": hotspots[:5],
+    }
+
+
+def shell_quote(value):
+    return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def write_wifi_remote_config(path, config):
+    lines = [
+        "# Managed by MeshBoard admin. You can also edit this file with vi.",
+        "# The retry script rereads this file every cycle, so changes apply without reboot.",
+        "",
+        f"ENABLED={'true' if config['enabled'] else 'false'}",
+        f"INTERFACE={shell_quote(config['interface'])}",
+        f"CONNECTION_NAME={shell_quote(config['connection_name'])}",
+        f"CONNECT_ONLY_WHEN_OFFLINE={'true' if config['connect_only_when_offline'] else 'false'}",
+        f"PREFER_VISIBLE_HOTSPOT={'true' if config['prefer_visible_hotspot'] else 'false'}",
+        f"CHECK_INTERVAL_SECONDS={int(config['check_interval_seconds'])}",
+        "",
+    ]
+    for index, hotspot in enumerate(config["hotspots"], start=1):
+        lines.extend(
+            [
+                f"HOTSPOT_{index}_ENABLED={'true' if hotspot['enabled'] else 'false'}",
+                f"HOTSPOT_{index}_SSID={shell_quote(hotspot['ssid'])}",
+                f"HOTSPOT_{index}_PSK={shell_quote(hotspot['psk'])}",
+                "",
+            ]
+        )
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write("\n".join(lines).rstrip() + "\n")
+    os.chmod(path, 0o600)
 
 
 @contextmanager
@@ -1075,7 +1174,9 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
 
     def show_config(self, error="", values=None):
         config_path = resolve_mesh_config_path(self.config)
+        wifi_config_path = resolve_wifi_remote_config_path(self.config)
         current = mesh_config.load_config(config_path)
+        remote_wifi = load_wifi_remote_config(wifi_config_path)
         retention = backup_manager.retention_days(Database(resolve_db_path(self.config)))
 
         def value(name, fallback):
@@ -1095,11 +1196,25 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
         wifi = current.get("wifi", {})
         bluetooth = current.get("bluetooth", {})
         local_ai = current.get("local_ai", {})
+        hotspot_rows = ""
+        for index, hotspot in enumerate(remote_wifi["hotspots"], start=1):
+            ssid_name = f"hotspot_{index}_ssid"
+            psk_name = f"hotspot_{index}_psk"
+            enabled_name = f"hotspot_{index}_enabled"
+            psk_note = "Password saved; leave blank to keep it." if hotspot.get("psk") else "No password saved."
+            hotspot_rows += (
+                f"<h3>Hotspot {index}</h3>"
+                f"<label><input type='checkbox' name='{enabled_name}' value='1'{checked(is_checked(enabled_name, hotspot.get('enabled', False)))}> Enable Hotspot {index}</label>"
+                f"<label>SSID</label>"
+                f"<input name='{ssid_name}' value='{esc(value(ssid_name, hotspot.get('ssid', '')))}'>"
+                f"<label>Password</label>"
+                f"<input name='{psk_name}' type='password' autocomplete='new-password' placeholder='{esc(psk_note)}'>"
+            )
 
         body = "<div class='card'><h2>Config</h2>"
         if error:
             body += f"<p class='flash'>{esc(error)}</p>"
-        body += f"<p class='muted'>Editing {esc(config_path)}. Restart MeshBoard after saving runtime changes.</p>"
+        body += f"<p class='muted'>Editing {esc(config_path)} and {esc(wifi_config_path)}. Restart MeshBoard after saving runtime changes.</p>"
         body += "<form method='post' action='/config'>"
         body += (
             "<h2>Backups</h2>"
@@ -1121,6 +1236,17 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
             f"<input name='wifi_port' type='number' min='1' max='65535' value='{esc(value('wifi_port', wifi.get('port', 4403)))}'>"
             "<label>Bluetooth Address</label>"
             f"<input name='bluetooth_address' value='{esc(value('bluetooth_address', bluetooth.get('address', '')))}'>"
+            "<h2>Remote Hotspot WiFi</h2>"
+            f"<label><input type='checkbox' name='wifi_remote_enabled' value='1'{checked(is_checked('wifi_remote_enabled', remote_wifi.get('enabled', False)))}> Enable Remote Hotspot Helper</label>"
+            "<label>WiFi Interface</label>"
+            f"<input name='wifi_remote_interface' value='{esc(value('wifi_remote_interface', remote_wifi.get('interface', 'auto')))}'>"
+            "<label>Connection Name</label>"
+            f"<input name='wifi_remote_connection_name' value='{esc(value('wifi_remote_connection_name', remote_wifi.get('connection_name', 'MeshBoardRemoteHotspot')))}'>"
+            "<label>Check Interval Seconds</label>"
+            f"<input name='wifi_remote_check_interval_seconds' type='number' min='10' max='3600' value='{esc(value('wifi_remote_check_interval_seconds', remote_wifi.get('check_interval_seconds', 60)))}'>"
+            f"<label><input type='checkbox' name='wifi_remote_connect_only_when_offline' value='1'{checked(is_checked('wifi_remote_connect_only_when_offline', remote_wifi.get('connect_only_when_offline', True)))}> Only try when WiFi is offline unless configured hotspot is visible</label>"
+            f"<label><input type='checkbox' name='wifi_remote_prefer_visible_hotspot' value='1'{checked(is_checked('wifi_remote_prefer_visible_hotspot', remote_wifi.get('prefer_visible_hotspot', True)))}> Prefer configured hotspot when visible</label>"
+            f"{hotspot_rows}"
             "<h2>Meshtastic Replies</h2>"
             "<label>Max Text Length</label>"
             f"<input name='max_text_length' type='number' min='20' max='240' value='{esc(value('max_text_length', meshtastic.get('max_text_length', 140)))}'>"
@@ -1415,6 +1541,30 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
             }
             os.makedirs(os.path.dirname(config_path), exist_ok=True)
             mesh_config.save_config(current, config_path)
+            wifi_config_path = resolve_wifi_remote_config_path(self.config)
+            existing_wifi = load_wifi_remote_config(wifi_config_path)
+            remote_hotspots = []
+            for index in range(1, 6):
+                ssid = (data.get(f"hotspot_{index}_ssid") or "").strip()
+                psk = data.get(f"hotspot_{index}_psk") or existing_wifi["hotspots"][index - 1].get("psk", "")
+                enabled = f"hotspot_{index}_enabled" in data
+                if enabled and ssid and not psk:
+                    return f"Hotspot {index} needs a password."
+                remote_hotspots.append({"enabled": enabled, "ssid": ssid, "psk": psk})
+            write_wifi_remote_config(
+                wifi_config_path,
+                {
+                    "enabled": "wifi_remote_enabled" in data,
+                    "interface": (data.get("wifi_remote_interface") or "").strip() or "auto",
+                    "connection_name": (data.get("wifi_remote_connection_name") or "").strip() or "MeshBoardRemoteHotspot",
+                    "connect_only_when_offline": "wifi_remote_connect_only_when_offline" in data,
+                    "prefer_visible_hotspot": "wifi_remote_prefer_visible_hotspot" in data,
+                    "check_interval_seconds": self.config_int(
+                        data, "wifi_remote_check_interval_seconds", "WiFi helper check interval", 10, 3600
+                    ),
+                    "hotspots": remote_hotspots,
+                },
+            )
         except ValueError as exc:
             return str(exc)
         return ""

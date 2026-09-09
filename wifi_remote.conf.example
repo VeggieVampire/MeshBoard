@@ -2,8 +2,6 @@
 # The retry script reads this file repeatedly, so changes apply without reboot.
 
 ENABLED=false
-SSID=YourHotspotName
-PSK=YourHotspotPassword
 
 # Use auto to pick the first WiFi device, or set a specific device such as wlan0.
 INTERFACE=auto
@@ -21,3 +19,23 @@ PREFER_VISIBLE_HOTSPOT=true
 
 # How often to retry while ENABLED=true.
 CHECK_INTERVAL_SECONDS=60
+
+HOTSPOT_1_ENABLED=true
+HOTSPOT_1_SSID=YourHotspotName
+HOTSPOT_1_PSK=YourHotspotPassword
+
+HOTSPOT_2_ENABLED=false
+HOTSPOT_2_SSID=
+HOTSPOT_2_PSK=
+
+HOTSPOT_3_ENABLED=false
+HOTSPOT_3_SSID=
+HOTSPOT_3_PSK=
+
+HOTSPOT_4_ENABLED=false
+HOTSPOT_4_SSID=
+HOTSPOT_4_PSK=
+
+HOTSPOT_5_ENABLED=false
+HOTSPOT_5_SSID=
+HOTSPOT_5_PSK=

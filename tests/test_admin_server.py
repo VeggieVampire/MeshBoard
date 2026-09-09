@@ -6,7 +6,7 @@ from http.cookiejar import CookieJar
 from urllib.parse import urlencode
 from urllib.request import HTTPCookieProcessor, Request, build_opener
 
-from admin_server import AdminHandler, check_password, fmt_time, make_password_hash
+from admin_server import AdminHandler, check_password, fmt_time, load_wifi_remote_config, make_password_hash
 import backup_manager
 import config as mesh_config
 from database import Database
@@ -213,7 +213,25 @@ class AdminServerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "meshboard.db")
             mesh_config_path = os.path.join(tmpdir, "meshtastic_config.json")
+            wifi_remote_path = os.path.join(tmpdir, "wifi_remote.conf")
             mesh_config.save_config(mesh_config.DEFAULT_CONFIG, mesh_config_path)
+            with open(wifi_remote_path, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "\n".join(
+                        [
+                            "ENABLED=false",
+                            "INTERFACE=auto",
+                            "CONNECTION_NAME=MeshBoardRemoteHotspot",
+                            "CONNECT_ONLY_WHEN_OFFLINE=true",
+                            "PREFER_VISIBLE_HOTSPOT=true",
+                            "CHECK_INTERVAL_SECONDS=60",
+                            "HOTSPOT_1_ENABLED=true",
+                            "HOTSPOT_1_SSID=OldPhone",
+                            "HOTSPOT_1_PSK=keep-secret",
+                        ]
+                    )
+                    + "\n"
+                )
             Database(db_path)
             config = {
                 "host": "127.0.0.1",
@@ -223,6 +241,7 @@ class AdminServerTests(unittest.TestCase):
                 "session_secret": "test-secret",
                 "database": {"path": db_path},
                 "mesh_config_path": mesh_config_path,
+                "wifi_remote_config_path": wifi_remote_path,
             }
             server = ThreadingHTTPServer(("127.0.0.1", 0), AdminHandler)
             server.config = config
@@ -240,6 +259,8 @@ class AdminServerTests(unittest.TestCase):
                 self.assertIn("Daily Retention Days", page)
                 self.assertIn("ACK Retries", page)
                 self.assertIn("Local AI", page)
+                self.assertIn("Remote Hotspot WiFi", page)
+                self.assertIn("Password saved; leave blank to keep it.", page)
 
                 data = urlencode(
                     {
@@ -268,6 +289,17 @@ class AdminServerTests(unittest.TestCase):
                         "local_ai_timeout_seconds": "30",
                         "local_ai_idle_shutdown_seconds": "1200",
                         "local_ai_startup_timeout_seconds": "60",
+                        "wifi_remote_enabled": "1",
+                        "wifi_remote_interface": "wlan0",
+                        "wifi_remote_connection_name": "MeshBoardRemoteHotspot",
+                        "wifi_remote_connect_only_when_offline": "1",
+                        "wifi_remote_prefer_visible_hotspot": "1",
+                        "wifi_remote_check_interval_seconds": "45",
+                        "hotspot_1_enabled": "1",
+                        "hotspot_1_ssid": "MyPhone",
+                        "hotspot_2_enabled": "1",
+                        "hotspot_2_ssid": "BackupPhone",
+                        "hotspot_2_psk": "backup-secret",
                     }
                 ).encode("utf-8")
                 with opener.open(Request(f"{base}/config", data=data, method="POST")):
@@ -286,6 +318,14 @@ class AdminServerTests(unittest.TestCase):
                 self.assertEqual("tiny-local", updated["local_ai"]["model"])
                 self.assertEqual(1200, updated["local_ai"]["idle_shutdown_seconds"])
                 self.assertEqual(60, updated["local_ai"]["startup_timeout_seconds"])
+                wifi_remote = load_wifi_remote_config(wifi_remote_path)
+                self.assertTrue(wifi_remote["enabled"])
+                self.assertEqual("wlan0", wifi_remote["interface"])
+                self.assertEqual(45, wifi_remote["check_interval_seconds"])
+                self.assertEqual("MyPhone", wifi_remote["hotspots"][0]["ssid"])
+                self.assertEqual("keep-secret", wifi_remote["hotspots"][0]["psk"])
+                self.assertEqual("BackupPhone", wifi_remote["hotspots"][1]["ssid"])
+                self.assertEqual("backup-secret", wifi_remote["hotspots"][1]["psk"])
             finally:
                 server.shutdown()
                 server.server_close()

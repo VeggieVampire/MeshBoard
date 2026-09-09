@@ -162,7 +162,9 @@ The launcher uses `/tmp/meshboard.lock` so a second copy exits instead of fighti
 
 For remote trips, you can keep a disabled hotspot config on the Pi and enable it when you need emergency SSH access. MeshBoard includes a NetworkManager helper for Raspberry Pi OS/OSMC systems that have `nmcli`.
 
-The installer creates the editable config:
+You can edit these settings from the admin website under Config > Remote Hotspot WiFi. Password fields stay blank in the browser when a password is already saved; leaving them blank keeps the existing password.
+
+The installer also creates the editable config for offline changes:
 
 ```bash
 vi ~/MeshBoard/wifi_remote.conf
@@ -172,13 +174,19 @@ Example:
 
 ```text
 ENABLED=true
-SSID=MyPhoneHotspot
-PSK=hotspot-password-here
 INTERFACE=auto
 CONNECTION_NAME=MeshBoardRemoteHotspot
 CONNECT_ONLY_WHEN_OFFLINE=true
 PREFER_VISIBLE_HOTSPOT=true
 CHECK_INTERVAL_SECONDS=60
+
+HOTSPOT_1_ENABLED=true
+HOTSPOT_1_SSID=MyPhoneHotspot
+HOTSPOT_1_PSK=hotspot-password-here
+
+HOTSPOT_2_ENABLED=true
+HOTSPOT_2_SSID=BackupHotspot
+HOTSPOT_2_PSK=backup-password-here
 ```
 
 The installer adds the retry helper at boot and starts it immediately. It stays idle while `ENABLED=false`.
@@ -187,7 +195,7 @@ The installer adds the retry helper at boot and starts it immediately. It stays 
 tail -f ~/MeshBoard/wifi-connect.log
 ```
 
-The helper rereads `wifi_remote.conf` every retry cycle. If `ENABLED=true`, it scans for the configured hotspot and connects when it can. Use `INTERFACE=auto` to pick the first WiFi device, or set a specific device such as `wlan0`. If `CONNECT_ONLY_WHEN_OFFLINE=true`, it normally leaves an already-connected WiFi network alone; `PREFER_VISIBLE_HOTSPOT=true` makes the configured hotspot win when it is visible, which is useful when a weak saved WiFi network is still associated but you want phone-hotspot access. Logs go to `wifi-connect.log`.
+The helper rereads `wifi_remote.conf` every retry cycle. If `ENABLED=true`, it scans for the configured hotspots and tries enabled entries in slot order until one connects. Use `INTERFACE=auto` to pick the first WiFi device, or set a specific device such as `wlan0`. If `CONNECT_ONLY_WHEN_OFFLINE=true`, it normally leaves an already-connected WiFi network alone; `PREFER_VISIBLE_HOTSPOT=true` makes any configured hotspot win when it is visible, which is useful when a weak saved WiFi network is still associated but you want phone-hotspot access. Logs go to `wifi-connect.log`.
 
 The installer grants the MeshBoard user passwordless permission to run `nmcli` through `/etc/sudoers.d/meshboard-nmcli`, because background hotspot scans and connection changes may be rejected by NetworkManager without it.
 
@@ -196,7 +204,7 @@ Useful checks:
 ```bash
 tail -f /home/osmc/MeshBoard/wifi-connect.log
 nmcli device status
-nmcli connection show MeshBoardRemoteHotspot
+nmcli connection show
 ```
 
 ## Local SysOp Admin Website

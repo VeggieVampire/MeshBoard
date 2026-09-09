@@ -83,40 +83,21 @@ wifi_interface() {
     "${NMCLI[@]}" -t -f DEVICE,TYPE device status 2>/dev/null | awk -F: '$2 == "wifi" {print $1; exit}'
 }
 
-connect_once() {
-    local enabled ssid psk configured_interface interface connection_name only_when_offline prefer_visible_hotspot current_ssid
+connect_hotspot() {
+    local index="$1"
+    local ssid="$2"
+    local psk="$3"
+    local interface="$4"
+    local connection_name="$5"
+    local only_when_offline="$6"
+    local prefer_visible_hotspot="$7"
+    local current_ssid connection_label
 
-    enabled="$(read_config_value ENABLED false)"
-    if ! truthy "$enabled"; then
-        return
-    fi
-
-    ssid="$(read_config_value SSID)"
-    psk="$(read_config_value PSK)"
-    configured_interface="$(read_config_value INTERFACE auto)"
-    interface="$(wifi_interface "$configured_interface")"
-    connection_name="$(read_config_value CONNECTION_NAME MeshBoardRemoteHotspot)"
-    only_when_offline="$(read_config_value CONNECT_ONLY_WHEN_OFFLINE true)"
-    prefer_visible_hotspot="$(read_config_value PREFER_VISIBLE_HOTSPOT true)"
-
-    if [[ -z "$ssid" || -z "$psk" ]]; then
-        log "ENABLED is true, but SSID or PSK is empty."
-        return
-    fi
-
-    if [[ -z "$interface" ]]; then
-        log "ENABLED is true, but no WiFi interface is visible to NetworkManager."
-        return
-    fi
-
-    log "Trying WiFi hotspot '$ssid' on $interface."
-    "${NMCLI[@]}" radio wifi on >> "$LOG_FILE" 2>&1 || true
-    "${NMCLI[@]}" device wifi rescan ifname "$interface" >> "$LOG_FILE" 2>&1 || true
-
+    connection_label="${connection_name}-${index}"
     current_ssid="$(active_ssid "$interface")"
     if [[ "$current_ssid" == "$ssid" ]]; then
         log "WiFi already connected on $interface to configured hotspot '$ssid'."
-        return
+        return 0
     fi
 
     if truthy "$only_when_offline" && wifi_connected "$interface"; then
@@ -124,19 +105,77 @@ connect_once() {
             log "Configured hotspot '$ssid' is visible; switching from ${current_ssid:-current WiFi}."
         else
             log "WiFi already connected on $interface${current_ssid:+ to $current_ssid}; configured hotspot '$ssid' not visible, skipping."
-            return
+            return 1
         fi
     fi
 
-    if "${NMCLI[@]}" connection show "$connection_name" >/dev/null 2>&1; then
-        "${NMCLI[@]}" connection modify "$connection_name" \
+    log "Trying WiFi hotspot '$ssid' on $interface."
+    if "${NMCLI[@]}" connection show "$connection_label" >/dev/null 2>&1; then
+        "${NMCLI[@]}" connection modify "$connection_label" \
             connection.autoconnect yes \
             802-11-wireless.ssid "$ssid" \
             wifi-sec.key-mgmt wpa-psk \
             wifi-sec.psk "$psk" >> "$LOG_FILE" 2>&1
-        "${NMCLI[@]}" connection up "$connection_name" ifname "$interface" >> "$LOG_FILE" 2>&1 || log "Connection attempt failed."
+        "${NMCLI[@]}" connection up "$connection_label" ifname "$interface" >> "$LOG_FILE" 2>&1 || {
+            log "Connection attempt failed for hotspot '$ssid'."
+            return 1
+        }
     else
-        "${NMCLI[@]}" device wifi connect "$ssid" password "$psk" ifname "$interface" name "$connection_name" >> "$LOG_FILE" 2>&1 || log "Connection attempt failed."
+        "${NMCLI[@]}" device wifi connect "$ssid" password "$psk" ifname "$interface" name "$connection_label" >> "$LOG_FILE" 2>&1 || {
+            log "Connection attempt failed for hotspot '$ssid'."
+            return 1
+        }
+    fi
+    return 0
+}
+
+connect_once() {
+    local enabled configured_interface interface connection_name only_when_offline prefer_visible_hotspot index slot_enabled ssid psk tried_any
+
+    enabled="$(read_config_value ENABLED false)"
+    if ! truthy "$enabled"; then
+        return
+    fi
+
+    configured_interface="$(read_config_value INTERFACE auto)"
+    interface="$(wifi_interface "$configured_interface")"
+    connection_name="$(read_config_value CONNECTION_NAME MeshBoardRemoteHotspot)"
+    only_when_offline="$(read_config_value CONNECT_ONLY_WHEN_OFFLINE true)"
+    prefer_visible_hotspot="$(read_config_value PREFER_VISIBLE_HOTSPOT true)"
+
+    if [[ -z "$interface" ]]; then
+        log "ENABLED is true, but no WiFi interface is visible to NetworkManager."
+        return
+    fi
+
+    "${NMCLI[@]}" radio wifi on >> "$LOG_FILE" 2>&1 || true
+    "${NMCLI[@]}" device wifi rescan ifname "$interface" >> "$LOG_FILE" 2>&1 || true
+
+    tried_any=false
+    for index in 1 2 3 4 5; do
+        slot_enabled="$(read_config_value "HOTSPOT_${index}_ENABLED")"
+        ssid="$(read_config_value "HOTSPOT_${index}_SSID")"
+        psk="$(read_config_value "HOTSPOT_${index}_PSK")"
+        if [[ -z "$ssid" && "$index" == "1" ]]; then
+            ssid="$(read_config_value SSID)"
+            psk="$(read_config_value PSK)"
+            slot_enabled="$(read_config_value HOTSPOT_1_ENABLED true)"
+        fi
+        if ! truthy "${slot_enabled:-false}"; then
+            continue
+        fi
+        if [[ -z "$ssid" || -z "$psk" ]]; then
+            log "Hotspot $index is enabled, but SSID or PSK is empty."
+            continue
+        fi
+        tried_any=true
+        if connect_hotspot "$index" "$ssid" "$psk" "$interface" "$connection_name" "$only_when_offline" "$prefer_visible_hotspot"; then
+            return
+        fi
+    done
+
+    if [[ "$tried_any" == "false" ]]; then
+        log "ENABLED is true, but no enabled hotspots are configured."
     fi
 }
 
