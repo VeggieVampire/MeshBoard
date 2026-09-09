@@ -15,5 +15,9 @@ CONNECTION_NAME=MeshBoardRemoteHotspot
 # already connected to something else.
 CONNECT_ONLY_WHEN_OFFLINE=true
 
+# When true, the configured hotspot wins if it is visible, even if wlan0 is
+# already connected to a different saved WiFi network.
+PREFER_VISIBLE_HOTSPOT=true
+
 # How often to retry while ENABLED=true.
 CHECK_INTERVAL_SECONDS=60

@@ -177,6 +177,7 @@ PSK=hotspot-password-here
 INTERFACE=auto
 CONNECTION_NAME=MeshBoardRemoteHotspot
 CONNECT_ONLY_WHEN_OFFLINE=true
+PREFER_VISIBLE_HOTSPOT=true
 CHECK_INTERVAL_SECONDS=60
 ```
 
@@ -186,7 +187,9 @@ The installer adds the retry helper at boot and starts it immediately. It stays 
 tail -f ~/MeshBoard/wifi-connect.log
 ```
 
-The helper rereads `wifi_remote.conf` every retry cycle. If `ENABLED=true` and the WiFi interface is offline, it tries to connect to the configured hotspot. Use `INTERFACE=auto` to pick the first WiFi device, or set a specific device such as `wlan0`. If `CONNECT_ONLY_WHEN_OFFLINE=true`, it leaves an already-connected WiFi network alone. Logs go to `wifi-connect.log`.
+The helper rereads `wifi_remote.conf` every retry cycle. If `ENABLED=true`, it scans for the configured hotspot and connects when it can. Use `INTERFACE=auto` to pick the first WiFi device, or set a specific device such as `wlan0`. If `CONNECT_ONLY_WHEN_OFFLINE=true`, it normally leaves an already-connected WiFi network alone; `PREFER_VISIBLE_HOTSPOT=true` makes the configured hotspot win when it is visible, which is useful when a weak saved WiFi network is still associated but you want phone-hotspot access. Logs go to `wifi-connect.log`.
+
+The installer grants the MeshBoard user passwordless permission to run `nmcli` through `/etc/sudoers.d/meshboard-nmcli`, because background hotspot scans and connection changes may be rejected by NetworkManager without it.
 
 Useful checks:
 

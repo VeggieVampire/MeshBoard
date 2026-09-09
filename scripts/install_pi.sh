@@ -18,6 +18,11 @@ fi
 sudo apt update
 sudo apt install -y python3-venv python3-pip python3-serial git rsync cron curl
 sudo systemctl enable --now cron || true
+if command -v nmcli >/dev/null 2>&1; then
+    nmcli_path="$(command -v nmcli)"
+    printf '%s ALL=(root) NOPASSWD: %s\n' "$(id -un)" "$nmcli_path" | sudo tee /etc/sudoers.d/meshboard-nmcli >/dev/null
+    sudo chmod 440 /etc/sudoers.d/meshboard-nmcli
+fi
 
 mkdir -p "$APP_DIR"
 SOURCE_DIR="$(pwd -P)"
