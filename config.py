@@ -41,6 +41,12 @@ DEFAULT_CONFIG = {
     "database": {
         "path": "meshboard.db",
     },
+    "local_ai": {
+        "enabled": False,
+        "url": "http://127.0.0.1:11434/api/generate",
+        "model": "llama3.2",
+        "timeout_seconds": 20,
+    },
 }
 
 logger = logging.getLogger(__name__)

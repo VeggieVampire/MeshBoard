@@ -286,6 +286,7 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
             "/locations": self.show_locations,
             "/edit-location": self.show_edit_location,
             "/games": self.show_games,
+            "/edit-game": self.show_edit_game,
             "/import-game": self.show_import_game,
             "/checkins": self.show_checkins,
             "/edit-checkin": self.show_edit_checkin,
@@ -346,6 +347,12 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
             elif action == "/set-game-enabled":
                 self.set_game_enabled(data.get("module_name"), data.get("enabled") == "1")
                 self.redirect("/games?updated=1")
+            elif action == "/edit-game":
+                error = self.update_game(data)
+                if error:
+                    self.show_edit_game(error, data)
+                else:
+                    self.redirect("/games?edited=1")
             elif action == "/import-game":
                 error = self.import_game(data)
                 if error:
@@ -891,16 +898,56 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
             valid = "Yes" if game["valid"] else "No"
             action_label = "Disable" if game["enabled"] else "Enable"
             action_value = "0" if game["enabled"] else "1"
+            edit_path = "/edit-game?" + urlencode({"module_name": game["module_name"]})
             body += (
                 f"<tr><td>{esc(game['menu_name'])}</td><td>{esc(game['filename'])}</td>"
                 f"<td>{enabled}</td><td>{valid}</td>"
-                f"<td>{form_button('/set-game-enabled', {'module_name': game['module_name'], 'enabled': action_value}, action_label, False)}</td></tr>"
+                f"<td>{link_button(edit_path, 'Edit')} "
+                f"{form_button('/set-game-enabled', {'module_name': game['module_name'], 'enabled': action_value}, action_label, False)}</td></tr>"
             )
         if not games:
             body += "<tr><td colspan='5'>No game plugins installed.</td></tr>"
         body += "</table>"
         body += "<p class='muted'>Enable/disable applies to the live Games menu. Imported plugins load after MeshBoard restarts.</p>"
         self.send_html("Games", body)
+
+    def game_path(self, module_name):
+        module_name = (module_name or "").strip()
+        if not GAME_NAME_PATTERN.match(module_name):
+            return None
+        games_dir = os.path.abspath(resolve_games_dir(self.config))
+        path = os.path.abspath(os.path.join(games_dir, f"{module_name}.py"))
+        if os.path.dirname(path) != games_dir:
+            return None
+        return path
+
+    def show_edit_game(self, error="", values=None):
+        values = values or {}
+        module_name = values.get("module_name") or self.query_value("module_name")
+        path = self.game_path(module_name)
+        if not path or not os.path.exists(path):
+            self.send_html("Games", "<p>Game plugin not found.</p><p><a class='button' href='/games'>Back</a></p>", 404)
+            return
+        if "source" in values:
+            source = values.get("source", "")
+        else:
+            with open(path, "r", encoding="utf-8") as handle:
+                source = handle.read()
+        body = "<div class='card'><h2>Edit Game Plugin</h2>"
+        if error:
+            body += f"<p class='flash'>{esc(error)}</p>"
+        body += (
+            "<form method='post' action='/edit-game'>"
+            f"<input type='hidden' name='module_name' value='{esc(module_name)}'>"
+            f"<p class='muted'>{esc(os.path.basename(path))}</p>"
+            "<label>Python Source</label>"
+            f"<textarea name='source'>{esc(source)}</textarea>"
+            "<button>Save Plugin</button> "
+            "<a class='button' href='/games'>Cancel</a>"
+            "</form></div>"
+            "<p class='muted'>Games receive process_command(user_id, command, bbs_system). Use bbs_system.db, bbs_system.get_recent_location_or_message(user_id), and bbs_system.ask_local_ai(prompt) when those features are enabled.</p>"
+        )
+        self.send_html("Edit Game", body)
 
     def show_import_game(self, error="", values=None):
         values = values or {}
@@ -1210,14 +1257,7 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
                 (module_name, 1 if enabled else 0, int(time.time())),
             )
 
-    def import_game(self, data):
-        filename = (data.get("filename") or "").strip()
-        source = data.get("source") or ""
-        if not filename.endswith(".py"):
-            filename += ".py"
-        module_name = filename[:-3]
-        if not GAME_NAME_PATTERN.match(module_name) or filename.startswith("__"):
-            return "Use a simple Python file name like my_game.py."
+    def validate_game_source(self, filename, source):
         if not source.strip():
             return "Paste the plugin Python source."
         try:
@@ -1241,6 +1281,32 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
             return "Plugin must set menu_name to a text value."
         if "process_command" not in functions:
             return "Plugin must define process_command(user_id, command, bbs_system)."
+        return ""
+
+    def update_game(self, data):
+        module_name = data.get("module_name")
+        source = data.get("source") or ""
+        path = self.game_path(module_name)
+        if not path or not os.path.exists(path):
+            return "Game plugin not found."
+        error = self.validate_game_source(os.path.basename(path), source)
+        if error:
+            return error
+        with open(path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(source.rstrip() + "\n")
+        return ""
+
+    def import_game(self, data):
+        filename = (data.get("filename") or "").strip()
+        source = data.get("source") or ""
+        if not filename.endswith(".py"):
+            filename += ".py"
+        module_name = filename[:-3]
+        if not GAME_NAME_PATTERN.match(module_name) or filename.startswith("__"):
+            return "Use a simple Python file name like my_game.py."
+        error = self.validate_game_source(filename, source)
+        if error:
+            return error
 
         games_dir = resolve_games_dir(self.config)
         os.makedirs(games_dir, exist_ok=True)

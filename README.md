@@ -18,6 +18,7 @@ MeshBoard also keeps the attached radio clock sane. On startup it sets the Mesht
 - Location check-ins with optional comments that also appear in nearby location results.
 - Local SysOp admin website for viewing database content, editing records, and enabling/disabling game plugins from the LAN or hotspot.
 - Admin backup/restore page with daily rotating backups and manual restore points.
+- Editable Python game plugins with access to MeshBoard location, database, mail, and optional local AI helpers.
 - Live GPS-aware Location tools using the sender node's latest Meshtastic position.
 - Saved location notes, nearby note lookup, and Hot Cold GPS gameplay.
 - USB serial first, with WiFi/TCP and Bluetooth/BLE fallback.
@@ -217,6 +218,53 @@ Admin pages include Users activity, editable AddressBook contacts, active and ar
 The admin launcher watches for a usable IPv4 address before starting the website. If the Pi has no LAN or hotspot IP, the web server stays down and only the small launcher loop remains. If the IP disappears later, the launcher stops the website until an IP comes back. To change the check interval, set `ADMIN_IP_CHECK_INTERVAL_SECONDS` before running `scripts/run_admin_forever.sh`.
 
 The `Games` admin page discovers Python game plugins in `modules/Games`. Enable/disable changes apply to the live Games menu. Imported game plugins are saved into `modules/Games` and load after MeshBoard restarts.
+
+Each game row has:
+
+- `Edit`: opens the plugin Python source in the admin website and validates it before saving.
+- `Enable` / `Disable`: controls whether the game appears in the Meshtastic Games menu.
+- `Import Game Plugin`: adds a new `.py` plugin file.
+
+Existing MeshBoard sessions load game code at startup, so restart MeshBoard after editing or importing a plugin:
+
+```bash
+pkill -f bbs_system.py
+```
+
+The cron/service launcher starts it again automatically.
+
+Game plugins receive the live `bbs_system` object:
+
+```python
+menu_name = "Trail Helper"
+
+def process_command(user_id, command, bbs_system):
+    location, message = bbs_system.get_recent_location_or_message(user_id)
+    if message:
+        return message
+    return bbs_system.ask_local_ai(
+        f"Make a short trail hint for {location['latitude']}, {location['longitude']}"
+    )
+```
+
+Useful plugin hooks:
+
+- `bbs_system.db`: access `meshboard.db` helpers for mail, users, locations, boards, and game settings.
+- `bbs_system.get_recent_location_or_message(user_id)`: get the user's fresh GPS position or a ready-to-send error message.
+- `bbs_system.get_latest_location(user_id)`: get the last cached GPS position without freshness checking.
+- `bbs_system.interface`: access the Meshtastic interface if a game needs lower-level radio behavior.
+- `bbs_system.ask_local_ai(prompt, system=None, model=None)`: call a local AI server when enabled.
+
+Local AI is off by default. To use an Ollama-compatible local server, add this to `meshtastic_config.json`:
+
+```json
+"local_ai": {
+    "enabled": true,
+    "url": "http://127.0.0.1:11434/api/generate",
+    "model": "llama3.2",
+    "timeout_seconds": 20
+}
+```
 
 ### Backups
 

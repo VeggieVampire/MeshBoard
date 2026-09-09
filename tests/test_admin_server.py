@@ -100,12 +100,33 @@ class AdminServerTests(unittest.TestCase):
                     games = response.read().decode("utf-8")
                 self.assertIn("Sample Game", games)
                 self.assertIn("Disable", games)
+                self.assertIn("Edit", games)
                 self.assertIn("Import Game Plugin", games)
 
                 disable_data = urlencode({"module_name": "sample_game", "enabled": "0"}).encode("utf-8")
                 with opener.open(Request(f"{base}/set-game-enabled", data=disable_data, method="POST")):
                     pass
                 self.assertFalse(Database(db_path).is_game_enabled("sample_game"))
+                with opener.open(f"{base}/games") as response:
+                    games = response.read().decode("utf-8")
+                self.assertIn("Enable", games)
+
+                with opener.open(f"{base}/edit-game?module_name=sample_game") as response:
+                    edit_page = response.read().decode("utf-8")
+                self.assertIn("Edit Game Plugin", edit_page)
+                self.assertIn("return &#x27;ok&#x27;", edit_page)
+
+                edited_source = (
+                    "menu_name = 'Sample Game'\n\n"
+                    "def process_command(user_id, command, bbs_system):\n"
+                    "    location, message = bbs_system.get_recent_location_or_message(user_id)\n"
+                    "    return message or bbs_system.ask_local_ai('say hi')\n"
+                )
+                edit_data = urlencode({"module_name": "sample_game", "source": edited_source}).encode("utf-8")
+                with opener.open(Request(f"{base}/edit-game", data=edit_data, method="POST")):
+                    pass
+                with open(os.path.join(games_dir, "sample_game.py"), "r", encoding="utf-8") as handle:
+                    self.assertIn("ask_local_ai", handle.read())
 
                 plugin_source = (
                     "menu_name = 'Trail Quiz'\n\n"

@@ -2,6 +2,9 @@ import os
 import importlib
 import time
 import logging
+import json
+import urllib.error
+import urllib.request
 from config import load_config
 from database import Database
 from interface import Interface
@@ -193,6 +196,32 @@ class BBSSystem:
         if age is not None and age > freshness:
             return None, stale_location_message(age)
         return location, None
+
+    def ask_local_ai(self, prompt, system=None, model=None, timeout=None):
+        ai_config = self.config.get("local_ai", {})
+        if not ai_config.get("enabled"):
+            return "Local AI is not enabled."
+        url = ai_config.get("url") or "http://127.0.0.1:11434/api/generate"
+        payload = {
+            "model": model or ai_config.get("model") or "llama3.2",
+            "prompt": prompt,
+            "stream": False,
+        }
+        if system:
+            payload["system"] = system
+        request = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout or ai_config.get("timeout_seconds", 20)) as response:
+                result = json.loads(response.read().decode("utf-8"))
+        except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            self.logger.warning("Local AI request failed: %s", exc)
+            return "Local AI did not respond."
+        return (result.get("response") or "").strip() or "Local AI returned an empty response."
 
     def process_command(self, user_id, command):
         """

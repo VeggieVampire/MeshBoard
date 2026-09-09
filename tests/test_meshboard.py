@@ -1,7 +1,10 @@
 import os
+import json
 import tempfile
+import threading
 import time
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import interface as interface_module
 from bbs_system import BBSSystem, normalize_command
@@ -24,6 +27,23 @@ class DummyInterface:
 
     def run(self):
         pass
+
+
+class FakeAIHandler(BaseHTTPRequestHandler):
+    last_payload = None
+
+    def log_message(self, fmt, *args):
+        pass
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        FakeAIHandler.last_payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        body = json.dumps({"response": "AI says trail clear"}).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
 
 def test_config(db_path):
@@ -73,6 +93,35 @@ class MeshBoardTests(unittest.TestCase):
         location, message = self.bbs.get_recent_location_or_message("!abc12345")
         self.assertIsNone(location)
         self.assertIn("last GPS position", message)
+
+    def test_local_ai_helper_is_optional(self):
+        self.assertEqual("Local AI is not enabled.", self.bbs.ask_local_ai("hello"))
+
+    def test_local_ai_helper_calls_configured_service(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), FakeAIHandler)
+        thread = None
+        try:
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            self.bbs.config["local_ai"] = {
+                "enabled": True,
+                "url": f"http://127.0.0.1:{server.server_address[1]}/api/generate",
+                "model": "tiny-local",
+                "timeout_seconds": 5,
+            }
+
+            response = self.bbs.ask_local_ai("hello", system="short replies")
+
+            self.assertEqual("AI says trail clear", response)
+            self.assertEqual("tiny-local", FakeAIHandler.last_payload["model"])
+            self.assertEqual("hello", FakeAIHandler.last_payload["prompt"])
+            self.assertEqual("short replies", FakeAIHandler.last_payload["system"])
+            self.assertFalse(FakeAIHandler.last_payload["stream"])
+        finally:
+            server.shutdown()
+            server.server_close()
+            if thread:
+                thread.join(timeout=5)
 
     def test_save_location_note_and_whats_here(self):
         user = "!abc12345"
