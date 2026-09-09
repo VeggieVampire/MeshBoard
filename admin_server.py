@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, urlencode
 
 import backup_manager
 import config as mesh_config
+from bbs_system import BBSSystem
 from database import Database
 
 
@@ -270,6 +271,19 @@ def selected(value, expected):
     return " selected" if str(value) == str(expected) else ""
 
 
+class AdminTestInterface:
+    def __init__(self):
+        self.sent = []
+        self.handle_message = None
+        self.handle_position = None
+
+    def send_message(self, user_id, message, reply_id=None):
+        self.sent.append((user_id, message, reply_id))
+
+    def run(self):
+        pass
+
+
 class AdminHandler(BaseHTTPRequestHandler):
     server_version = "MeshBoardAdmin/1.0"
 
@@ -347,6 +361,7 @@ class AdminHandler(BaseHTTPRequestHandler):
                 ("/games", "Games"),
                 ("/checkins", "Check-Ins"),
                 ("/backups", "Backups"),
+                ("/test-commands", "Test Commands"),
                 ("/config", "Config"),
                 ("/logs", "Logs"),
                 ("/logout", "Logout"),
@@ -430,6 +445,7 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
             "/checkins": self.show_checkins,
             "/edit-checkin": self.show_edit_checkin,
             "/backups": self.show_backups,
+            "/test-commands": self.show_test_commands,
             "/config": self.show_config,
             "/logs": self.show_logs,
         }
@@ -541,6 +557,8 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
                     self.show_backups(error)
                 else:
                     self.redirect("/backups?settings=1")
+            elif action == "/test-commands":
+                self.handle_test_command(data)
             elif action == "/config":
                 error = self.update_config(data)
                 if error:
@@ -616,6 +634,7 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
                 ),
                 ("/games", "Games", len(self.discover_games(conn)), "installed plugins"),
                 ("/backups", "Backups", len(backup_manager.list_backups()), "saved restore points"),
+                ("/test-commands", "Test Commands", "", "emulate mesh DMs"),
                 (
                     "/checkins",
                     "Check-Ins",
@@ -1197,6 +1216,63 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
             body += "<tr><td colspan='5'>No backups yet.</td></tr>"
         body += "</table>"
         self.send_html("Backups", body)
+
+    def test_bbs(self):
+        config_path = resolve_mesh_config_path(self.config)
+        config_mtime = os.path.getmtime(config_path) if os.path.exists(config_path) else 0
+        db_path = resolve_db_path(self.config)
+        emulator = getattr(self.server, "test_bbs", None)
+        if emulator and getattr(self.server, "test_bbs_config_mtime", None) == config_mtime:
+            return emulator
+        mesh_runtime_config = mesh_config.load_config(config_path)
+        mesh_runtime_config["database"] = {"path": db_path}
+        interface = AdminTestInterface()
+        emulator = BBSSystem(config=mesh_runtime_config, database=Database(db_path), interface=interface)
+        self.server.test_bbs = emulator
+        self.server.test_bbs_config_mtime = config_mtime
+        return emulator
+
+    def show_test_commands(self, result=None, node_id="!test0001", command=""):
+        body = "<div class='card'><h2>Test Commands</h2>"
+        body += (
+            "<p class='muted'>Emulates a direct Meshtastic text message without using the radio. "
+            "Use one fake node ID across commands to walk menus with saved state.</p>"
+            "<form method='post' action='/test-commands'>"
+            "<label>Fake Node ID</label>"
+            f"<input name='node_id' value='{esc(node_id)}'>"
+            "<label>Command</label>"
+            f"<textarea name='command' placeholder='top, 1, mail, etc.'>{esc(command)}</textarea>"
+            "<button name='action' value='send'>Send Test Command</button> "
+            "<button name='action' value='reset'>Reset This Fake Node</button>"
+            "</form>"
+        )
+        if result:
+            body += "<h2>Result</h2>"
+            body += f"<p><strong>From:</strong> {esc(result['node_id'])}</p>"
+            body += f"<p><strong>Command:</strong> {esc(result['command'])}</p>"
+            body += "<h3>MeshBoard Reply</h3>"
+            body += f"<pre>{esc(result['reply'])}</pre>"
+            if result.get("async_replies"):
+                body += "<h3>Async Direct Replies</h3>"
+                for reply in result["async_replies"]:
+                    body += f"<pre>{esc(reply)}</pre>"
+        body += "</div>"
+        self.send_html("Test Commands", body)
+
+    def handle_test_command(self, data):
+        node_id = (data.get("node_id") or "!test0001").strip() or "!test0001"
+        command = (data.get("command") or "").strip()
+        emulator = self.test_bbs()
+        if data.get("action") == "reset":
+            emulator.users.pop(node_id, None)
+            result = {"node_id": node_id, "command": "reset", "reply": "Fake node session reset.", "async_replies": []}
+            self.show_test_commands(result, node_id, "")
+            return
+        before = len(getattr(emulator.interface, "sent", []))
+        reply = emulator.handle_message(node_id, command)
+        async_replies = [message for sent_node, message, _ in emulator.interface.sent[before:] if sent_node == node_id]
+        result = {"node_id": node_id, "command": command, "reply": reply, "async_replies": async_replies}
+        self.show_test_commands(result, node_id, command)
 
     def show_config(self, error="", values=None):
         config_path = resolve_mesh_config_path(self.config)

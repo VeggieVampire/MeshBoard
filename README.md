@@ -17,6 +17,7 @@ MeshBoard also keeps the attached radio clock sane. On startup it sets the Mesht
 - Events check-in board with a 24-hour HAM-style roster from AddressBook.
 - Location check-ins with optional comments that also appear in nearby location results.
 - Local SysOp admin website for viewing database content, editing records, and enabling/disabling game plugins from the LAN or hotspot.
+- Admin Test Commands console for emulating direct mesh messages without a second Meshtastic device.
 - Admin backup/restore page with daily rotating backups and manual restore points.
 - Editable Python game plugins with access to MeshBoard location, database, mail, and optional local AI helpers.
 - Local AI menu backed by on-demand Ollama startup and 20-minute idle shutdown.
@@ -235,7 +236,9 @@ cd ~/MeshBoard
 vi admin_config.json
 ```
 
-Admin pages include Users activity, editable AddressBook contacts, active and archived Mail messages, Message Board posts, location notes, Events check-ins, game controls, backups, configuration, and recent logs. Edit/archive/delete/remove/close/restore buttons change local MeshBoard files immediately, so use them like a real SysOp console.
+Admin pages include Users activity, editable AddressBook contacts, active and archived Mail messages, Message Board posts, location notes, Events check-ins, game controls, backups, test commands, configuration, and recent logs. Edit/archive/delete/remove/close/restore buttons change local MeshBoard files immediately, so use them like a real SysOp console.
+
+The `Test Commands` admin page emulates direct messages from a fake node ID. It keeps menu state for that fake node, so you can send `top`, `3`, `1`, and other commands through the web UI without needing a second Meshtastic device.
 
 The admin launcher watches for a usable IPv4 address before starting the website. If the Pi has no LAN or hotspot IP, the web server stays down and only the small launcher loop remains. If the IP disappears later, the launcher stops the website until an IP comes back. To change the check interval, set `ADMIN_IP_CHECK_INTERVAL_SECONDS` before running `scripts/run_admin_forever.sh`.
 

@@ -350,6 +350,60 @@ class AdminServerTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=5)
 
+    def test_test_commands_emulates_mesh_messages(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "meshboard.db")
+            mesh_config_path = os.path.join(tmpdir, "meshtastic_config.json")
+            config_data = mesh_config.DEFAULT_CONFIG.copy()
+            config_data["database"] = {"path": db_path}
+            mesh_config.save_config(config_data, mesh_config_path)
+            Database(db_path)
+            config = {
+                "host": "127.0.0.1",
+                "port": 0,
+                "username": "sysop",
+                "password_hash": make_password_hash("secret"),
+                "session_secret": "test-secret",
+                "database": {"path": db_path},
+                "mesh_config_path": mesh_config_path,
+                "wifi_remote_config_path": os.path.join(tmpdir, "wifi_remote.conf"),
+            }
+            server = ThreadingHTTPServer(("127.0.0.1", 0), AdminHandler)
+            server.config = config
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base = f"http://127.0.0.1:{server.server_address[1]}"
+                opener = build_opener(HTTPCookieProcessor(CookieJar()))
+                login_data = urlencode({"username": "sysop", "password": "secret"}).encode("utf-8")
+                with opener.open(Request(f"{base}/login", data=login_data, method="POST")):
+                    pass
+
+                with opener.open(f"{base}/test-commands") as response:
+                    page = response.read().decode("utf-8")
+                self.assertIn("Test Commands", page)
+                self.assertIn("Fake Node ID", page)
+
+                data = urlencode({"node_id": "!admintest", "command": "top", "action": "send"}).encode("utf-8")
+                with opener.open(Request(f"{base}/test-commands", data=data, method="POST")) as response:
+                    page = response.read().decode("utf-8")
+                self.assertIn("Main Menu", page)
+
+                data = urlencode({"node_id": "!admintest", "command": "3", "action": "send"}).encode("utf-8")
+                with opener.open(Request(f"{base}/test-commands", data=data, method="POST")) as response:
+                    page = response.read().decode("utf-8")
+                self.assertIn("Mail", page)
+                self.assertIn("Inbox", page)
+
+                data = urlencode({"node_id": "!admintest", "action": "reset"}).encode("utf-8")
+                with opener.open(Request(f"{base}/test-commands", data=data, method="POST")) as response:
+                    page = response.read().decode("utf-8")
+                self.assertIn("Fake node session reset.", page)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
     def test_login_and_delete_message(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "meshboard.db")
