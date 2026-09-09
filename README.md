@@ -213,7 +213,7 @@ cd ~/MeshBoard
 vi admin_config.json
 ```
 
-Admin pages include Users activity, editable AddressBook contacts, active and archived Mail messages, Message Board posts, location notes, Events check-ins, game controls, backups, and recent logs. Edit/archive/delete/remove/close/restore buttons change local MeshBoard files immediately, so use them like a real SysOp console.
+Admin pages include Users activity, editable AddressBook contacts, active and archived Mail messages, Message Board posts, location notes, Events check-ins, game controls, backups, configuration, and recent logs. Edit/archive/delete/remove/close/restore buttons change local MeshBoard files immediately, so use them like a real SysOp console.
 
 The admin launcher watches for a usable IPv4 address before starting the website. If the Pi has no LAN or hotspot IP, the web server stays down and only the small launcher loop remains. If the IP disappears later, the launcher stops the website until an IP comes back. To change the check interval, set `ADMIN_IP_CHECK_INTERVAL_SECONDS` before running `scripts/run_admin_forever.sh`.
 
@@ -265,6 +265,27 @@ Local AI is off by default. To use an Ollama-compatible local server, add this t
     "timeout_seconds": 20
 }
 ```
+
+### Config
+
+The `Config` admin page is the central place for routine customization. It edits `meshtastic_config.json` and backup retention without needing SSH.
+
+Config sections include:
+
+- `Backups`: daily retention days.
+- `Connection`: USB path, WiFi/TCP host and port, Bluetooth address, and preferred connection type.
+- `Meshtastic Replies`: max text length, chunk delay, ACK timeout, ACK retries, and reconnect delay.
+- `GPS / Location`: GPS freshness and What's Here/Nearby radius settings.
+- `Time Sync`: mesh/host time sync options and timestamp safety limits.
+- `Local AI`: optional local AI URL, model, timeout, and enable switch.
+
+Runtime changes take effect after MeshBoard restarts:
+
+```bash
+pkill -f bbs_system.py
+```
+
+The cron/service launcher starts it again automatically.
 
 ### Backups
 

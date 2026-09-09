@@ -8,6 +8,7 @@ from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 from admin_server import AdminHandler, check_password, fmt_time, make_password_hash
 import backup_manager
+import config as mesh_config
 from database import Database
 from http.server import ThreadingHTTPServer
 
@@ -53,6 +54,7 @@ class AdminServerTests(unittest.TestCase):
                     ("/games", "Games"),
                     ("/backups", "Backups"),
                     ("/checkins", "Check-Ins"),
+                    ("/config", "Config"),
                     ("/logs", "Logs"),
                 ):
                     self.assertIn(f"<a class='dashboard-link' href='{path}'>", dashboard)
@@ -206,6 +208,84 @@ class AdminServerTests(unittest.TestCase):
                     os.environ.pop("MESHBOARD_BACKUP_DIR", None)
                 else:
                     os.environ["MESHBOARD_BACKUP_DIR"] = old_backup_dir
+
+    def test_config_page_updates_runtime_config_and_backup_retention(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "meshboard.db")
+            mesh_config_path = os.path.join(tmpdir, "meshtastic_config.json")
+            mesh_config.save_config(mesh_config.DEFAULT_CONFIG, mesh_config_path)
+            Database(db_path)
+            config = {
+                "host": "127.0.0.1",
+                "port": 0,
+                "username": "sysop",
+                "password_hash": make_password_hash("secret"),
+                "session_secret": "test-secret",
+                "database": {"path": db_path},
+                "mesh_config_path": mesh_config_path,
+            }
+            server = ThreadingHTTPServer(("127.0.0.1", 0), AdminHandler)
+            server.config = config
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base = f"http://127.0.0.1:{server.server_address[1]}"
+                opener = build_opener(HTTPCookieProcessor(CookieJar()))
+                login_data = urlencode({"username": "sysop", "password": "secret"}).encode("utf-8")
+                with opener.open(Request(f"{base}/login", data=login_data, method="POST")):
+                    pass
+
+                with opener.open(f"{base}/config") as response:
+                    page = response.read().decode("utf-8")
+                self.assertIn("Daily Retention Days", page)
+                self.assertIn("ACK Retries", page)
+                self.assertIn("Local AI", page)
+
+                data = urlencode(
+                    {
+                        "backup_retention_days": "14",
+                        "connection_type": "wifi",
+                        "device_path": "/dev/serial/by-id/test-radio",
+                        "wifi_hostname": "192.168.1.50",
+                        "wifi_port": "4404",
+                        "bluetooth_address": "AA:BB:CC:DD:EE:FF",
+                        "max_text_length": "120",
+                        "chunk_delay_seconds": "0.2",
+                        "ack_timeout_seconds": "9",
+                        "ack_retries": "4",
+                        "reconnect_delay_seconds": "12",
+                        "gps_freshness_seconds": "600",
+                        "whats_here_radius_meters": "200",
+                        "nearby_radius_meters": "1500",
+                        "sync_on_startup": "1",
+                        "sync_from_mesh": "1",
+                        "sync_interval_seconds": "1800",
+                        "minimum_valid_epoch": "1704067200",
+                        "maximum_future_seconds": "86400",
+                        "local_ai_enabled": "1",
+                        "local_ai_url": "http://127.0.0.1:11434/api/generate",
+                        "local_ai_model": "tiny-local",
+                        "local_ai_timeout_seconds": "30",
+                    }
+                ).encode("utf-8")
+                with opener.open(Request(f"{base}/config", data=data, method="POST")):
+                    pass
+
+                updated = mesh_config.load_config(mesh_config_path)
+                self.assertEqual("14", Database(db_path).get_app_setting(backup_manager.RETENTION_SETTING))
+                self.assertEqual("wifi", updated["connection_type"])
+                self.assertEqual("192.168.1.50", updated["wifi"]["hostname"])
+                self.assertEqual(4404, updated["wifi"]["port"])
+                self.assertEqual(4, updated["meshtastic"]["ack_retries"])
+                self.assertEqual(600, updated["gps"]["freshness_seconds"])
+                self.assertFalse(updated["time_sync"]["sync_from_host"])
+                self.assertTrue(updated["time_sync"]["sync_from_mesh"])
+                self.assertTrue(updated["local_ai"]["enabled"])
+                self.assertEqual("tiny-local", updated["local_ai"]["model"])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
 
     def test_login_and_delete_message(self):
         with tempfile.TemporaryDirectory() as tmpdir:

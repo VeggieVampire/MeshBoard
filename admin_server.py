@@ -16,11 +16,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode
 
 import backup_manager
+import config as mesh_config
 from database import Database
 
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.environ.get("MESHBOARD_ADMIN_CONFIG", os.path.join(APP_DIR, "admin_config.json"))
+MESH_CONFIG_PATH = os.environ.get("MESHBOARD_CONFIG", os.path.join(APP_DIR, mesh_config.CONFIG_FILE))
 SESSION_COOKIE = "meshboard_admin"
 SESSION_MAX_AGE = 12 * 60 * 60
 BOARD_CATEGORIES = [
@@ -87,6 +89,13 @@ def resolve_backup_app_dir(config):
     return path
 
 
+def resolve_mesh_config_path(config):
+    path = config.get("mesh_config_path", MESH_CONFIG_PATH)
+    if not os.path.isabs(path):
+        path = os.path.join(APP_DIR, path)
+    return path
+
+
 @contextmanager
 def db_connect(config):
     conn = sqlite3.connect(resolve_db_path(config))
@@ -130,6 +139,10 @@ def link_button(path, label):
 
 def checked(value):
     return " checked" if value else ""
+
+
+def selected(value, expected):
+    return " selected" if str(value) == str(expected) else ""
 
 
 class AdminHandler(BaseHTTPRequestHandler):
@@ -209,6 +222,7 @@ class AdminHandler(BaseHTTPRequestHandler):
                 ("/games", "Games"),
                 ("/checkins", "Check-Ins"),
                 ("/backups", "Backups"),
+                ("/config", "Config"),
                 ("/logs", "Logs"),
                 ("/logout", "Logout"),
             ]
@@ -291,6 +305,7 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
             "/checkins": self.show_checkins,
             "/edit-checkin": self.show_edit_checkin,
             "/backups": self.show_backups,
+            "/config": self.show_config,
             "/logs": self.show_logs,
         }
         handler = routes.get(path)
@@ -401,6 +416,12 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
                     self.show_backups(error)
                 else:
                     self.redirect("/backups?settings=1")
+            elif action == "/config":
+                error = self.update_config(data)
+                if error:
+                    self.show_config(error, data)
+                else:
+                    self.redirect("/config?saved=1")
             else:
                 self.send_html("Not Found", "<p>Not found.</p>", 404)
         except sqlite3.Error as exc:
@@ -477,6 +498,7 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
                     "events",
                 ),
                 ("/logs", "Logs", "", "recent service output"),
+                ("/config", "Config", "", "customization"),
             ]
         body = "<div class='grid'>" + "".join(
             (
@@ -1051,6 +1073,98 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
         body += "</table>"
         self.send_html("Backups", body)
 
+    def show_config(self, error="", values=None):
+        config_path = resolve_mesh_config_path(self.config)
+        current = mesh_config.load_config(config_path)
+        retention = backup_manager.retention_days(Database(resolve_db_path(self.config)))
+
+        def value(name, fallback):
+            if values is not None and name in values:
+                return values.get(name, "")
+            return fallback
+
+        def is_checked(name, fallback):
+            if values is not None:
+                return name in values
+            return bool(fallback)
+
+        connection_type = value("connection_type", current.get("connection_type", "auto"))
+        gps = current.get("gps", {})
+        meshtastic = current.get("meshtastic", {})
+        time_sync = current.get("time_sync", {})
+        wifi = current.get("wifi", {})
+        bluetooth = current.get("bluetooth", {})
+        local_ai = current.get("local_ai", {})
+
+        body = "<div class='card'><h2>Config</h2>"
+        if error:
+            body += f"<p class='flash'>{esc(error)}</p>"
+        body += f"<p class='muted'>Editing {esc(config_path)}. Restart MeshBoard after saving runtime changes.</p>"
+        body += "<form method='post' action='/config'>"
+        body += (
+            "<h2>Backups</h2>"
+            "<label>Daily Retention Days</label>"
+            f"<input name='backup_retention_days' type='number' min='1' max='365' value='{esc(value('backup_retention_days', retention))}'>"
+            "<h2>Connection</h2>"
+            "<label>Connection Type</label>"
+            "<select name='connection_type'>"
+            f"<option value='auto'{selected(connection_type, 'auto')}>auto</option>"
+            f"<option value='serial'{selected(connection_type, 'serial')}>serial</option>"
+            f"<option value='wifi'{selected(connection_type, 'wifi')}>wifi</option>"
+            f"<option value='bluetooth'{selected(connection_type, 'bluetooth')}>bluetooth</option>"
+            "</select>"
+            "<label>USB Device Path</label>"
+            f"<input name='device_path' value='{esc(value('device_path', current.get('device_path', '')))}'>"
+            "<label>WiFi Hostname/IP</label>"
+            f"<input name='wifi_hostname' value='{esc(value('wifi_hostname', wifi.get('hostname', '')))}'>"
+            "<label>WiFi Port</label>"
+            f"<input name='wifi_port' type='number' min='1' max='65535' value='{esc(value('wifi_port', wifi.get('port', 4403)))}'>"
+            "<label>Bluetooth Address</label>"
+            f"<input name='bluetooth_address' value='{esc(value('bluetooth_address', bluetooth.get('address', '')))}'>"
+            "<h2>Meshtastic Replies</h2>"
+            "<label>Max Text Length</label>"
+            f"<input name='max_text_length' type='number' min='20' max='240' value='{esc(value('max_text_length', meshtastic.get('max_text_length', 140)))}'>"
+            "<label>Chunk Delay Seconds</label>"
+            f"<input name='chunk_delay_seconds' type='number' min='0' max='30' step='0.1' value='{esc(value('chunk_delay_seconds', meshtastic.get('chunk_delay_seconds', 0.5)))}'>"
+            "<label>ACK Timeout Seconds</label>"
+            f"<input name='ack_timeout_seconds' type='number' min='1' max='120' value='{esc(value('ack_timeout_seconds', meshtastic.get('ack_timeout_seconds', 7)))}'>"
+            "<label>ACK Retries</label>"
+            f"<input name='ack_retries' type='number' min='0' max='10' value='{esc(value('ack_retries', meshtastic.get('ack_retries', 3)))}'>"
+            "<label>Reconnect Delay Seconds</label>"
+            f"<input name='reconnect_delay_seconds' type='number' min='1' max='300' value='{esc(value('reconnect_delay_seconds', meshtastic.get('reconnect_delay_seconds', 10)))}'>"
+            "<h2>GPS / Location</h2>"
+            "<label>GPS Freshness Seconds</label>"
+            f"<input name='gps_freshness_seconds' type='number' min='30' max='86400' value='{esc(value('gps_freshness_seconds', gps.get('freshness_seconds', 300)))}'>"
+            "<label>What's Here Radius Meters</label>"
+            f"<input name='whats_here_radius_meters' type='number' min='1' max='100000' value='{esc(value('whats_here_radius_meters', gps.get('whats_here_radius_meters', 100)))}'>"
+            "<label>Nearby Radius Meters</label>"
+            f"<input name='nearby_radius_meters' type='number' min='1' max='1000000' value='{esc(value('nearby_radius_meters', gps.get('nearby_radius_meters', 1000)))}'>"
+            f"<label><input type='checkbox' name='log_raw_history' value='1'{checked(is_checked('log_raw_history', gps.get('log_raw_history', False)))}> Log Raw GPS History</label>"
+            "<h2>Time Sync</h2>"
+            f"<label><input type='checkbox' name='sync_on_startup' value='1'{checked(is_checked('sync_on_startup', time_sync.get('sync_on_startup', True)))}> Sync On Startup</label>"
+            f"<label><input type='checkbox' name='sync_from_host' value='1'{checked(is_checked('sync_from_host', time_sync.get('sync_from_host', False)))}> Sync From Host Clock</label>"
+            f"<label><input type='checkbox' name='sync_from_mesh' value='1'{checked(is_checked('sync_from_mesh', time_sync.get('sync_from_mesh', True)))}> Sync From Mesh Packets</label>"
+            "<label>Sync Interval Seconds</label>"
+            f"<input name='sync_interval_seconds' type='number' min='60' max='86400' value='{esc(value('sync_interval_seconds', time_sync.get('sync_interval_seconds', 3600)))}'>"
+            "<label>Minimum Valid Epoch</label>"
+            f"<input name='minimum_valid_epoch' type='number' min='0' value='{esc(value('minimum_valid_epoch', time_sync.get('minimum_valid_epoch', 1704067200)))}'>"
+            "<label>Maximum Future Seconds</label>"
+            f"<input name='maximum_future_seconds' type='number' min='0' max='31536000' value='{esc(value('maximum_future_seconds', time_sync.get('maximum_future_seconds', 172800)))}'>"
+            f"<label><input type='checkbox' name='allow_receive_time' value='1'{checked(is_checked('allow_receive_time', time_sync.get('allow_receive_time', False)))}> Allow Local Receive Time</label>"
+            "<h2>Local AI</h2>"
+            f"<label><input type='checkbox' name='local_ai_enabled' value='1'{checked(is_checked('local_ai_enabled', local_ai.get('enabled', False)))}> Enable Local AI</label>"
+            "<label>Local AI URL</label>"
+            f"<input name='local_ai_url' value='{esc(value('local_ai_url', local_ai.get('url', 'http://127.0.0.1:11434/api/generate')))}'>"
+            "<label>Local AI Model</label>"
+            f"<input name='local_ai_model' value='{esc(value('local_ai_model', local_ai.get('model', 'llama3.2')))}'>"
+            "<label>Local AI Timeout Seconds</label>"
+            f"<input name='local_ai_timeout_seconds' type='number' min='1' max='300' value='{esc(value('local_ai_timeout_seconds', local_ai.get('timeout_seconds', 20)))}'>"
+            "<button>Save Config</button> "
+            "<a class='button' href='/'>Cancel</a>"
+            "</form></div>"
+        )
+        self.send_html("Config", body)
+
     def show_logs(self):
         log_path = os.path.join(APP_DIR, "listener.log")
         try:
@@ -1224,6 +1338,79 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
             )
         if cursor.rowcount == 0:
             return "Check-in not found."
+        return ""
+
+    def config_int(self, data, key, label, minimum=None, maximum=None):
+        try:
+            value = int(data.get(key))
+        except (TypeError, ValueError):
+            raise ValueError(f"{label} must be a number.")
+        if minimum is not None and value < minimum:
+            raise ValueError(f"{label} must be at least {minimum}.")
+        if maximum is not None and value > maximum:
+            raise ValueError(f"{label} must be no more than {maximum}.")
+        return value
+
+    def config_float(self, data, key, label, minimum=None, maximum=None):
+        try:
+            value = float(data.get(key))
+        except (TypeError, ValueError):
+            raise ValueError(f"{label} must be a number.")
+        if minimum is not None and value < minimum:
+            raise ValueError(f"{label} must be at least {minimum}.")
+        if maximum is not None and value > maximum:
+            raise ValueError(f"{label} must be no more than {maximum}.")
+        return value
+
+    def update_config(self, data):
+        try:
+            retention_error = self.update_backup_retention(data.get("backup_retention_days"))
+            if retention_error:
+                return retention_error
+            connection_type = (data.get("connection_type") or "").strip()
+            if connection_type not in ("auto", "serial", "wifi", "bluetooth"):
+                return "Choose a valid connection type."
+            config_path = resolve_mesh_config_path(self.config)
+            current = mesh_config.load_config(config_path)
+            current["connection_type"] = connection_type
+            current["device_path"] = (data.get("device_path") or "").strip()
+            current["wifi"] = {
+                "hostname": (data.get("wifi_hostname") or "").strip(),
+                "port": self.config_int(data, "wifi_port", "WiFi port", 1, 65535),
+            }
+            current["bluetooth"] = {"address": (data.get("bluetooth_address") or "").strip()}
+            current["gps"] = {
+                "freshness_seconds": self.config_int(data, "gps_freshness_seconds", "GPS freshness", 30, 86400),
+                "whats_here_radius_meters": self.config_int(data, "whats_here_radius_meters", "What's Here radius", 1, 100000),
+                "nearby_radius_meters": self.config_int(data, "nearby_radius_meters", "Nearby radius", 1, 1000000),
+                "log_raw_history": "log_raw_history" in data,
+            }
+            current["meshtastic"] = {
+                "max_text_length": self.config_int(data, "max_text_length", "Max text length", 20, 240),
+                "chunk_delay_seconds": self.config_float(data, "chunk_delay_seconds", "Chunk delay", 0, 30),
+                "ack_timeout_seconds": self.config_int(data, "ack_timeout_seconds", "ACK timeout", 1, 120),
+                "ack_retries": self.config_int(data, "ack_retries", "ACK retries", 0, 10),
+                "reconnect_delay_seconds": self.config_int(data, "reconnect_delay_seconds", "Reconnect delay", 1, 300),
+            }
+            current["time_sync"] = {
+                "sync_on_startup": "sync_on_startup" in data,
+                "sync_from_host": "sync_from_host" in data,
+                "sync_from_mesh": "sync_from_mesh" in data,
+                "sync_interval_seconds": self.config_int(data, "sync_interval_seconds", "Sync interval", 60, 86400),
+                "minimum_valid_epoch": self.config_int(data, "minimum_valid_epoch", "Minimum valid epoch", 0, None),
+                "maximum_future_seconds": self.config_int(data, "maximum_future_seconds", "Maximum future seconds", 0, 31536000),
+                "allow_receive_time": "allow_receive_time" in data,
+            }
+            current["local_ai"] = {
+                "enabled": "local_ai_enabled" in data,
+                "url": (data.get("local_ai_url") or "").strip() or "http://127.0.0.1:11434/api/generate",
+                "model": (data.get("local_ai_model") or "").strip() or "llama3.2",
+                "timeout_seconds": self.config_int(data, "local_ai_timeout_seconds", "Local AI timeout", 1, 300),
+            }
+            os.makedirs(os.path.dirname(config_path), exist_ok=True)
+            mesh_config.save_config(current, config_path)
+        except ValueError as exc:
+            return str(exc)
         return ""
 
     def update_backup_retention(self, retention_days):
