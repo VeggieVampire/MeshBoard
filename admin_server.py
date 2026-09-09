@@ -1156,9 +1156,13 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
             "<label>Local AI URL</label>"
             f"<input name='local_ai_url' value='{esc(value('local_ai_url', local_ai.get('url', 'http://127.0.0.1:11434/api/generate')))}'>"
             "<label>Local AI Model</label>"
-            f"<input name='local_ai_model' value='{esc(value('local_ai_model', local_ai.get('model', 'llama3.2')))}'>"
+            f"<input name='local_ai_model' value='{esc(value('local_ai_model', local_ai.get('model', 'tinyllama')))}'>"
             "<label>Local AI Timeout Seconds</label>"
-            f"<input name='local_ai_timeout_seconds' type='number' min='1' max='300' value='{esc(value('local_ai_timeout_seconds', local_ai.get('timeout_seconds', 20)))}'>"
+            f"<input name='local_ai_timeout_seconds' type='number' min='1' max='300' value='{esc(value('local_ai_timeout_seconds', local_ai.get('timeout_seconds', 120)))}'>"
+            "<label>Local AI Idle Shutdown Seconds</label>"
+            f"<input name='local_ai_idle_shutdown_seconds' type='number' min='60' max='86400' value='{esc(value('local_ai_idle_shutdown_seconds', local_ai.get('idle_shutdown_seconds', 1200)))}'>"
+            "<label>Local AI Startup Timeout Seconds</label>"
+            f"<input name='local_ai_startup_timeout_seconds' type='number' min='10' max='600' value='{esc(value('local_ai_startup_timeout_seconds', local_ai.get('startup_timeout_seconds', 120)))}'>"
             "<button>Save Config</button> "
             "<a class='button' href='/'>Cancel</a>"
             "</form></div>"
@@ -1404,8 +1408,10 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
             current["local_ai"] = {
                 "enabled": "local_ai_enabled" in data,
                 "url": (data.get("local_ai_url") or "").strip() or "http://127.0.0.1:11434/api/generate",
-                "model": (data.get("local_ai_model") or "").strip() or "llama3.2",
+                "model": (data.get("local_ai_model") or "").strip() or "tinyllama",
                 "timeout_seconds": self.config_int(data, "local_ai_timeout_seconds", "Local AI timeout", 1, 300),
+                "idle_shutdown_seconds": self.config_int(data, "local_ai_idle_shutdown_seconds", "Local AI idle shutdown", 60, 86400),
+                "startup_timeout_seconds": self.config_int(data, "local_ai_startup_timeout_seconds", "Local AI startup timeout", 10, 600),
             }
             os.makedirs(os.path.dirname(config_path), exist_ok=True)
             mesh_config.save_config(current, config_path)

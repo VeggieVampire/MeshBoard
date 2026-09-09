@@ -42,10 +42,12 @@ DEFAULT_CONFIG = {
         "path": "meshboard.db",
     },
     "local_ai": {
-        "enabled": False,
+        "enabled": True,
         "url": "http://127.0.0.1:11434/api/generate",
-        "model": "llama3.2",
-        "timeout_seconds": 20,
+        "model": "tinyllama",
+        "timeout_seconds": 120,
+        "idle_shutdown_seconds": 1200,
+        "startup_timeout_seconds": 120,
     },
 }
 

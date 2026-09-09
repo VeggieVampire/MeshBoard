@@ -7,6 +7,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import interface as interface_module
+import local_ai_service
 from bbs_system import BBSSystem, normalize_command
 from config import DEFAULT_CONFIG
 from database import Database
@@ -24,9 +25,13 @@ class DummyInterface:
     def __init__(self):
         self.handle_message = None
         self.handle_position = None
+        self.sent = []
 
     def run(self):
         pass
+
+    def send_message(self, user_id, message, reply_id=None):
+        self.sent.append((user_id, message, reply_id))
 
 
 class FakeAIHandler(BaseHTTPRequestHandler):
@@ -95,12 +100,25 @@ class MeshBoardTests(unittest.TestCase):
         self.assertIn("last GPS position", message)
 
     def test_local_ai_helper_is_optional(self):
-        self.assertEqual("Local AI is not enabled.", self.bbs.ask_local_ai("hello"))
+        self.bbs.config["local_ai"] = {"enabled": False}
+        self.assertEqual("Local AI is disabled in Config.", self.bbs.ask_local_ai("hello"))
 
     def test_local_ai_helper_calls_configured_service(self):
         server = ThreadingHTTPServer(("127.0.0.1", 0), FakeAIHandler)
         thread = None
+        original_which = local_ai_service.shutil.which
         try:
+            local_ai_service.shutil.which = lambda name: "ollama"
+            self.bbs.local_ai_manager.popen = lambda *args, **kwargs: type(
+                "FakeProcess",
+                (),
+                {
+                    "poll": lambda self: None,
+                    "terminate": lambda self: None,
+                    "wait": lambda self, timeout=None: None,
+                    "kill": lambda self: None,
+                },
+            )()
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             self.bbs.config["local_ai"] = {
@@ -118,10 +136,109 @@ class MeshBoardTests(unittest.TestCase):
             self.assertEqual("short replies", FakeAIHandler.last_payload["system"])
             self.assertFalse(FakeAIHandler.last_payload["stream"])
         finally:
+            local_ai_service.shutil.which = original_which
+            self.bbs.local_ai_manager.shutdown()
             server.shutdown()
             server.server_close()
             if thread:
                 thread.join(timeout=5)
+
+    def test_local_ai_menu_boots_answers_and_shutdowns(self):
+        class FakeManager:
+            def __init__(self):
+                self.shutdowns = 0
+
+            def ensure_started(self):
+                return True, "starting"
+
+            def wait_until_ready(self, stop_event=None):
+                return True, "ready"
+
+            def ask(self, prompt, system=None, model=None, timeout=None):
+                return True, f"answer to {prompt}"
+
+            def shutdown(self):
+                self.shutdowns += 1
+
+            def update_config(self, config):
+                pass
+
+        user = "!aiuser"
+        fake = FakeManager()
+        self.bbs.local_ai_manager = fake
+
+        booting = self.bbs.handle_message(user, "7")
+        self.assertIn("Local AI booting up", booting)
+        for _ in range(20):
+            if self.bbs.interface.sent:
+                break
+            time.sleep(0.05)
+        self.assertIn("Local AI is ready", self.bbs.interface.sent[-1][1])
+
+        answer = self.bbs.handle_message(user, "what is nearby?")
+        self.assertIn("answer to what is nearby?", answer)
+
+        ended = self.bbs.handle_message(user, "end of line")
+        self.assertIn("Local AI shut down", ended)
+        self.assertIn("Main Menu", ended)
+        self.assertEqual(1, fake.shutdowns)
+
+    def test_top_shuts_down_local_ai(self):
+        class FakeManager:
+            def __init__(self):
+                self.shutdowns = 0
+
+            def ensure_started(self):
+                return True, "starting"
+
+            def wait_until_ready(self, stop_event=None):
+                return True, "ready"
+
+            def shutdown(self):
+                self.shutdowns += 1
+
+            def update_config(self, config):
+                pass
+
+        user = "!aitop"
+        fake = FakeManager()
+        self.bbs.local_ai_manager = fake
+        self.bbs.handle_message(user, "7")
+
+        menu = self.bbs.handle_message(user, "top")
+
+        self.assertIn("Main Menu", menu)
+        self.assertEqual(1, fake.shutdowns)
+
+    def test_leaving_local_ai_while_booting_suppresses_ready_message(self):
+        class FakeManager:
+            def __init__(self):
+                self.shutdowns = 0
+
+            def ensure_started(self):
+                time.sleep(0.1)
+                return True, "starting"
+
+            def wait_until_ready(self, stop_event=None):
+                return True, "ready"
+
+            def shutdown(self):
+                self.shutdowns += 1
+
+            def update_config(self, config):
+                pass
+
+        user = "!aicancel"
+        fake = FakeManager()
+        self.bbs.local_ai_manager = fake
+
+        self.bbs.handle_message(user, "7")
+        menu = self.bbs.handle_message(user, "top")
+        time.sleep(0.2)
+
+        self.assertIn("Main Menu", menu)
+        self.assertEqual(1, fake.shutdowns)
+        self.assertEqual([], self.bbs.interface.sent)
 
     def test_save_location_note_and_whats_here(self):
         user = "!abc12345"
@@ -431,7 +548,8 @@ class MeshBoardTests(unittest.TestCase):
         chunks = interface.chunk_message("alpha beta gamma delta epsilon zeta eta theta")
         self.assertGreater(len(chunks), 1)
         self.assertTrue(all(len(chunk) <= 40 for chunk in chunks))
-        self.assertEqual("alpha beta gamma delta epsilon zeta eta theta", " ".join(chunks))
+        self.assertTrue(chunks[0].endswith(f"1 of {len(chunks)}"))
+        self.assertTrue(chunks[-1].endswith(f"{len(chunks)} of {len(chunks)}"))
 
     def test_first_screen_menus_fit_single_radio_packet(self):
         self.bbs.users["!abc12345"] = {"menu": ["main"]}

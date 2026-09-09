@@ -7,6 +7,8 @@ ADMIN_USERNAME="${MESHBOARD_ADMIN_USERNAME:-sysop}"
 ADMIN_PASSWORD="${MESHBOARD_ADMIN_PASSWORD:-}"
 ADMIN_CREDENTIALS_FILE="${MESHBOARD_ADMIN_CREDENTIALS_FILE:-$APP_DIR/admin_credentials.txt}"
 ADMIN_INSTALL_INFO_FILE="${MESHBOARD_ADMIN_INSTALL_INFO_FILE:-$APP_DIR/.admin_install_info}"
+INSTALL_OLLAMA="${MESHBOARD_INSTALL_OLLAMA:-true}"
+OLLAMA_MODEL="${MESHBOARD_OLLAMA_MODEL:-tinyllama}"
 
 if [[ ! -f "bbs_system.py" ]]; then
     echo "Run this script from the MeshBoard repository root."
@@ -14,7 +16,7 @@ if [[ ! -f "bbs_system.py" ]]; then
 fi
 
 sudo apt update
-sudo apt install -y python3-venv python3-pip python3-serial git rsync cron
+sudo apt install -y python3-venv python3-pip python3-serial git rsync cron curl
 sudo systemctl enable --now cron || true
 
 mkdir -p "$APP_DIR"
@@ -37,6 +39,27 @@ fi
 python3 -m venv "$APP_DIR/.venv"
 "$APP_DIR/.venv/bin/python" -m pip install --upgrade pip
 "$APP_DIR/.venv/bin/python" -m pip install meshtastic
+
+if [[ "$INSTALL_OLLAMA" == "true" ]]; then
+    machine="$(uname -m)"
+    arch_bits="$(getconf LONG_BIT || echo 0)"
+    if [[ "$machine" == "armv6l" || "$machine" == "armv7l" || ( "$machine" == arm* && "$arch_bits" == "32" ) ]]; then
+        echo "Ollama is not supported on this 32-bit ARM OS; Local AI can still point to another Ollama server."
+    elif ! command -v ollama >/dev/null 2>&1; then
+        curl -fsSL https://ollama.com/install.sh | sh || echo "Ollama install failed; Local AI will show an install hint until Ollama is available."
+    fi
+    sudo systemctl disable --now ollama >/dev/null 2>&1 || true
+    if command -v ollama >/dev/null 2>&1; then
+        (
+            ollama serve >/tmp/meshboard-ollama-install.log 2>&1 &
+            ollama_pid=$!
+            sleep 5
+            ollama pull "$OLLAMA_MODEL" || true
+            kill "$ollama_pid" >/dev/null 2>&1 || true
+            wait "$ollama_pid" >/dev/null 2>&1 || true
+        )
+    fi
+fi
 
 if [[ ! -f "$APP_DIR/meshtastic_config.json" ]]; then
     (
@@ -164,13 +187,22 @@ install_cron_entry() {
     fi
 }
 
+remove_cron_entry() {
+    local marker="$1"
+    local current
+
+    current="$(crontab -l 2>/dev/null || true)"
+    printf '%s\n' "$current" | grep -Fv "$marker" | crontab -
+}
+
 quote_shell() {
     local value="$1"
     printf "'%s'" "${value//\'/\'\\\'\'}"
 }
 
 quoted_app_dir="$(quote_shell "$APP_DIR")"
-install_cron_entry "meshboard-bbs" "@reboot" "APP_DIR=$quoted_app_dir $quoted_app_dir/scripts/run_meshboard_forever.sh"
+remove_cron_entry "meshboard-bbs"
+remove_cron_entry "run_meshboard_forever.sh"
 install_cron_entry "meshboard-admin" "@reboot" "APP_DIR=$quoted_app_dir $quoted_app_dir/scripts/run_admin_forever.sh"
 install_cron_entry "meshboard-wifi" "@reboot" "APP_DIR=$quoted_app_dir $quoted_app_dir/scripts/run_wifi_connect_forever.sh"
 install_cron_entry "meshboard-daily-backup" "@daily" "cd $quoted_app_dir && $quoted_app_dir/.venv/bin/python $quoted_app_dir/backup_manager.py --daily"
@@ -180,7 +212,6 @@ install_cron_entry "meshboard-daily-backup" "@daily" "cd $quoted_app_dir && $quo
     "$APP_DIR/.venv/bin/python" "$APP_DIR/backup_manager.py" --daily >/dev/null 2>&1 || true
 )
 
-nohup env APP_DIR="$APP_DIR" "$APP_DIR/scripts/run_meshboard_forever.sh" >/dev/null 2>&1 &
 nohup env APP_DIR="$APP_DIR" "$APP_DIR/scripts/run_admin_forever.sh" >/dev/null 2>&1 &
 nohup env APP_DIR="$APP_DIR" "$APP_DIR/scripts/run_wifi_connect_forever.sh" >/dev/null 2>&1 &
 
@@ -234,6 +265,7 @@ fi
 echo "Installed MeshBoard to $APP_DIR."
 echo "MeshBoard, the admin website, and the WiFi helper were installed at boot and started now."
 echo "Daily backups were enabled; restore points are stored in $APP_DIR/backups."
+echo "Local AI uses Ollama model $OLLAMA_MODEL when installed and starts only when users open Local AI."
 echo "Edit $APP_DIR/wifi_remote.conf later if you want the Pi to join a phone hotspot."
 echo
 echo "Admin website:"

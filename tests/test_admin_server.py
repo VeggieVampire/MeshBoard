@@ -266,6 +266,8 @@ class AdminServerTests(unittest.TestCase):
                         "local_ai_url": "http://127.0.0.1:11434/api/generate",
                         "local_ai_model": "tiny-local",
                         "local_ai_timeout_seconds": "30",
+                        "local_ai_idle_shutdown_seconds": "1200",
+                        "local_ai_startup_timeout_seconds": "60",
                     }
                 ).encode("utf-8")
                 with opener.open(Request(f"{base}/config", data=data, method="POST")):
@@ -282,6 +284,8 @@ class AdminServerTests(unittest.TestCase):
                 self.assertTrue(updated["time_sync"]["sync_from_mesh"])
                 self.assertTrue(updated["local_ai"]["enabled"])
                 self.assertEqual("tiny-local", updated["local_ai"]["model"])
+                self.assertEqual(1200, updated["local_ai"]["idle_shutdown_seconds"])
+                self.assertEqual(60, updated["local_ai"]["startup_timeout_seconds"])
             finally:
                 server.shutdown()
                 server.server_close()

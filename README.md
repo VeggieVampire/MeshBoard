@@ -19,6 +19,7 @@ MeshBoard also keeps the attached radio clock sane. On startup it sets the Mesht
 - Local SysOp admin website for viewing database content, editing records, and enabling/disabling game plugins from the LAN or hotspot.
 - Admin backup/restore page with daily rotating backups and manual restore points.
 - Editable Python game plugins with access to MeshBoard location, database, mail, and optional local AI helpers.
+- Local AI menu backed by on-demand Ollama startup and 20-minute idle shutdown.
 - Live GPS-aware Location tools using the sender node's latest Meshtastic position.
 - Saved location notes, nearby note lookup, and Hot Cold GPS gameplay.
 - USB serial first, with WiFi/TCP and Bluetooth/BLE fallback.
@@ -37,6 +38,7 @@ MeshBoard also keeps the attached radio clock sane. On startup it sets the Mesht
 - `modules/Mail/` provides private inbox, send, AddressBook opt-in, reply, archive, and send-to-all flows.
 - `modules/MessageBoard/` provides public board categories and Events check-ins.
 - `modules/CheckIns/` lists recent location check-ins from the main menu.
+- `modules/LocalAI/` provides an on-demand local AI question menu.
 - `modules/WhosBeenHere/` lists automatic recent users by last interaction time and command count.
 - `modules/Location/` provides What's Here, Drop Note, Nearby Notes, and location check-ins.
 - `modules/Games/` remains dynamically loaded as the Games submenu.
@@ -60,6 +62,7 @@ The installer does the full default setup:
 - Creates disabled `wifi_remote.conf` so hotspot access can be enabled later by editing one file.
 - Installs startup entries for MeshBoard, the admin website, and the WiFi helper.
 - Enables daily backups in `~/MeshBoard/backups` and creates the first daily backup.
+- Installs Ollama when supported, pulls the small `tinyllama` model, and disables the always-on Ollama service so Local AI starts only on demand. On 32-bit ARM Pi OS, Ollama is skipped and Local AI can be pointed at another LAN Ollama server from Config.
 - Starts MeshBoard and the admin website immediately.
 
 After install, the script prints the admin URL, username, password, and config file locations. You can also find the generated admin login on the Pi:
@@ -119,6 +122,14 @@ Example `meshtastic_config.json`:
     },
     "database": {
         "path": "meshboard.db"
+    },
+    "local_ai": {
+        "enabled": true,
+        "url": "http://127.0.0.1:11434/api/generate",
+        "model": "tinyllama",
+        "timeout_seconds": 120,
+        "idle_shutdown_seconds": 1200,
+        "startup_timeout_seconds": 120
     }
 }
 ```
@@ -255,14 +266,16 @@ Useful plugin hooks:
 - `bbs_system.interface`: access the Meshtastic interface if a game needs lower-level radio behavior.
 - `bbs_system.ask_local_ai(prompt, system=None, model=None)`: call a local AI server when enabled.
 
-Local AI is off by default. To use an Ollama-compatible local server, add this to `meshtastic_config.json`:
+Local AI uses an Ollama-compatible local server. The installer tries to install Ollama and pull `tinyllama` when the OS supports it. The Ollama service is disabled after install so MeshBoard starts it only when someone opens the Local AI menu. On 32-bit ARM Pi OS, use Config to point `url` at another LAN Ollama server.
 
 ```json
 "local_ai": {
     "enabled": true,
     "url": "http://127.0.0.1:11434/api/generate",
-    "model": "llama3.2",
-    "timeout_seconds": 20
+    "model": "tinyllama",
+    "timeout_seconds": 120,
+    "idle_shutdown_seconds": 1200,
+    "startup_timeout_seconds": 120
 }
 ```
 
@@ -277,7 +290,7 @@ Config sections include:
 - `Meshtastic Replies`: max text length, chunk delay, ACK timeout, ACK retries, and reconnect delay.
 - `GPS / Location`: GPS freshness and What's Here/Nearby radius settings.
 - `Time Sync`: mesh/host time sync options and timestamp safety limits.
-- `Local AI`: optional local AI URL, model, timeout, and enable switch.
+- `Local AI`: optional local AI URL, model, timeout, idle shutdown, startup timeout, and enable switch.
 
 Runtime changes take effect after MeshBoard restarts:
 
@@ -388,6 +401,7 @@ Main Menu:
 4. Who's Been Here
 5. Message Board
 6. Check-Ins
+7. Local AI
 Reply number. top - Main, cd .. - Back
 ```
 
@@ -435,6 +449,16 @@ Check-Ins:
 
 - Shows recent location check-ins from the main menu.
 - This is separate from Events check-ins. Events check-ins are the HAM-style 24-hour roster under Message Board > Events and do not require GPS.
+
+Local AI:
+
+- Open `Local AI` from the main menu.
+- MeshBoard replies with `Local AI booting up...` and help text immediately.
+- When Ollama and the configured model are ready, MeshBoard sends `Local AI is ready. Ask any short question.`
+- Ask short questions in plain text.
+- Send `top` or `end of line` to shut down Local AI and return to the main menu.
+- If nobody uses Local AI for 20 minutes, MeshBoard unloads/stops it to free Pi resources.
+- Long AI replies are split into radio-sized chunks with a footer such as `1 of 3`.
 
 ## What Was Tested
 

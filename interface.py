@@ -317,19 +317,36 @@ class Interface:
         if max_length <= 0 or len(message) <= max_length:
             return [message]
 
-        chunks = []
-        remaining = message
-        while len(remaining) > max_length:
-            split_at = remaining.rfind(" ", 0, max_length + 1)
-            newline_at = remaining.rfind("\n", 0, max_length + 1)
-            split_at = max(split_at, newline_at)
-            if split_at < max_length // 2:
-                split_at = max_length
-            chunks.append(remaining[:split_at].rstrip())
-            remaining = remaining[split_at:].lstrip()
-        if remaining:
-            chunks.append(remaining)
-        return chunks
+        return self.numbered_chunks(message, max_length)
+
+    def numbered_chunks(self, message, max_length):
+        def split_for_footer(footer_digits):
+            chunks = []
+            remaining = message
+            footer_room = len(f"\n{'9' * footer_digits} of {'9' * footer_digits}")
+            content_limit = max(1, max_length - footer_room)
+            while len(remaining) > content_limit:
+                split_at = remaining.rfind(" ", 0, content_limit + 1)
+                newline_at = remaining.rfind("\n", 0, content_limit + 1)
+                split_at = max(split_at, newline_at)
+                if split_at < content_limit // 2:
+                    split_at = content_limit
+                chunks.append(remaining[:split_at].rstrip())
+                remaining = remaining[split_at:].lstrip()
+            if remaining:
+                chunks.append(remaining)
+            return chunks
+
+        chunks = split_for_footer(1)
+        while len(str(len(chunks))) > 1:
+            digits = len(str(len(chunks)))
+            resized = split_for_footer(digits)
+            if len(resized) == len(chunks):
+                chunks = resized
+                break
+            chunks = resized
+        total = len(chunks)
+        return [f"{chunk}\n{index} of {total}" for index, chunk in enumerate(chunks, start=1)]
 
     def log_telemetry(self, sender, latitude, longitude, altitude, timestamp):
         """Log telemetry data to a CSV file."""
