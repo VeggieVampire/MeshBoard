@@ -151,14 +151,15 @@ chmod +x "$APP_DIR/scripts/run_meshboard_forever.sh" "$APP_DIR/scripts/run_admin
 
 install_cron_entry() {
     local marker="$1"
-    local command="$2"
+    local schedule="$2"
+    local command="$3"
     local current
 
     current="$(crontab -l 2>/dev/null || true)"
     if ! printf '%s\n' "$current" | grep -Fq "$marker"; then
         {
             printf '%s\n' "$current"
-            printf '@reboot %s # %s\n' "$command" "$marker"
+            printf '%s %s # %s\n' "$schedule" "$command" "$marker"
         } | crontab -
     fi
 }
@@ -169,9 +170,15 @@ quote_shell() {
 }
 
 quoted_app_dir="$(quote_shell "$APP_DIR")"
-install_cron_entry "meshboard-bbs" "APP_DIR=$quoted_app_dir $quoted_app_dir/scripts/run_meshboard_forever.sh"
-install_cron_entry "meshboard-admin" "APP_DIR=$quoted_app_dir $quoted_app_dir/scripts/run_admin_forever.sh"
-install_cron_entry "meshboard-wifi" "APP_DIR=$quoted_app_dir $quoted_app_dir/scripts/run_wifi_connect_forever.sh"
+install_cron_entry "meshboard-bbs" "@reboot" "APP_DIR=$quoted_app_dir $quoted_app_dir/scripts/run_meshboard_forever.sh"
+install_cron_entry "meshboard-admin" "@reboot" "APP_DIR=$quoted_app_dir $quoted_app_dir/scripts/run_admin_forever.sh"
+install_cron_entry "meshboard-wifi" "@reboot" "APP_DIR=$quoted_app_dir $quoted_app_dir/scripts/run_wifi_connect_forever.sh"
+install_cron_entry "meshboard-daily-backup" "@daily" "cd $quoted_app_dir && $quoted_app_dir/.venv/bin/python $quoted_app_dir/backup_manager.py --daily"
+
+(
+    cd "$APP_DIR"
+    "$APP_DIR/.venv/bin/python" "$APP_DIR/backup_manager.py" --daily >/dev/null 2>&1 || true
+)
 
 nohup env APP_DIR="$APP_DIR" "$APP_DIR/scripts/run_meshboard_forever.sh" >/dev/null 2>&1 &
 nohup env APP_DIR="$APP_DIR" "$APP_DIR/scripts/run_admin_forever.sh" >/dev/null 2>&1 &
@@ -226,6 +233,7 @@ fi
 
 echo "Installed MeshBoard to $APP_DIR."
 echo "MeshBoard, the admin website, and the WiFi helper were installed at boot and started now."
+echo "Daily backups were enabled; restore points are stored in $APP_DIR/backups."
 echo "Edit $APP_DIR/wifi_remote.conf later if you want the Pi to join a phone hotspot."
 echo
 echo "Admin website:"

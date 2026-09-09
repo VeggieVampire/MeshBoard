@@ -102,6 +102,12 @@ class Database:
                     enabled INTEGER NOT NULL DEFAULT 1,
                     updated_at INTEGER NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
                 """
             )
             columns = {
@@ -487,4 +493,25 @@ class Database:
                     updated_at = excluded.updated_at
                 """,
                 (module_name, 1 if enabled else 0, now),
+            )
+
+    def get_app_setting(self, key, default=None):
+        with self.connect() as conn:
+            row = conn.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
+        if not row:
+            return default
+        return row["value"]
+
+    def set_app_setting(self, key, value):
+        now = int(time.time())
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO app_settings (key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at
+                """,
+                (key, str(value), now),
             )

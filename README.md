@@ -17,6 +17,7 @@ MeshBoard also keeps the attached radio clock sane. On startup it sets the Mesht
 - Events check-in board with a 24-hour HAM-style roster from AddressBook.
 - Location check-ins with optional comments that also appear in nearby location results.
 - Local SysOp admin website for viewing database content, editing records, and enabling/disabling game plugins from the LAN or hotspot.
+- Admin backup/restore page with daily rotating backups and manual restore points.
 - Live GPS-aware Location tools using the sender node's latest Meshtastic position.
 - Saved location notes, nearby note lookup, and Hot Cold GPS gameplay.
 - USB serial first, with WiFi/TCP and Bluetooth/BLE fallback.
@@ -30,6 +31,7 @@ MeshBoard also keeps the attached radio clock sane. On startup it sets the Mesht
 - `bbs_system.py` owns per-node sessions, dynamic module loading, unread mail notices, and latest in-memory GPS state.
 - `database.py` initializes and accesses `meshboard.db`.
 - `admin_server.py` provides the local SysOp admin website.
+- `backup_manager.py` creates, prunes, lists, and restores whole-app backup archives.
 - `location_service.py` contains GPS freshness and Haversine helpers.
 - `modules/Mail/` provides private inbox, send, AddressBook opt-in, reply, archive, and send-to-all flows.
 - `modules/MessageBoard/` provides public board categories and Events check-ins.
@@ -56,6 +58,7 @@ The installer does the full default setup:
 - Creates `admin_config.json`, enables the admin website, generates a private admin password, saves it to `admin_credentials.txt`, and prints the login details at the end.
 - Creates disabled `wifi_remote.conf` so hotspot access can be enabled later by editing one file.
 - Installs startup entries for MeshBoard, the admin website, and the WiFi helper.
+- Enables daily backups in `~/MeshBoard/backups` and creates the first daily backup.
 - Starts MeshBoard and the admin website immediately.
 
 After install, the script prints the admin URL, username, password, and config file locations. You can also find the generated admin login on the Pi:
@@ -209,11 +212,29 @@ cd ~/MeshBoard
 vi admin_config.json
 ```
 
-Admin pages include Users activity, editable AddressBook contacts, active and archived Mail messages, Message Board posts, location notes, Events check-ins, and recent logs. Edit/archive/delete/remove/close buttons change `meshboard.db` immediately, so use them like a real SysOp console.
+Admin pages include Users activity, editable AddressBook contacts, active and archived Mail messages, Message Board posts, location notes, Events check-ins, game controls, backups, and recent logs. Edit/archive/delete/remove/close/restore buttons change local MeshBoard files immediately, so use them like a real SysOp console.
 
 The admin launcher watches for a usable IPv4 address before starting the website. If the Pi has no LAN or hotspot IP, the web server stays down and only the small launcher loop remains. If the IP disappears later, the launcher stops the website until an IP comes back. To change the check interval, set `ADMIN_IP_CHECK_INTERVAL_SECONDS` before running `scripts/run_admin_forever.sh`.
 
 The `Games` admin page discovers Python game plugins in `modules/Games`. Enable/disable changes apply to the live Games menu. Imported game plugins are saved into `modules/Games` and load after MeshBoard restarts.
+
+### Backups
+
+The `Backups` admin page has:
+
+- `Backup All Now`: creates a manual zip restore point.
+- `Daily Retention Days`: controls how many daily backups are kept. The default is 7 days.
+- `Restore`: restores the selected backup over the current app files.
+
+The installer adds this cron entry:
+
+```bash
+@daily cd ~/MeshBoard && ~/MeshBoard/.venv/bin/python ~/MeshBoard/backup_manager.py --daily
+```
+
+Daily backups use one file per day, so a second daily run on the same date overwrites that day's file. Older daily backups are pruned after the retention limit. Manual backups are kept until you remove them from `~/MeshBoard/backups`.
+
+Backups include MeshBoard code, database, local configs, and plugin files. They exclude `.git`, `.venv`, logs, Python cache files, and the backup folder itself.
 
 ## Connection Options
 

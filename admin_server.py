@@ -9,10 +9,14 @@ import re
 import secrets
 import sqlite3
 import time
+import zipfile
 from contextlib import contextmanager
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode
+
+import backup_manager
+from database import Database
 
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -71,6 +75,13 @@ def resolve_db_path(config):
 
 def resolve_games_dir(config):
     path = config.get("games_dir", os.path.join(APP_DIR, "modules", "Games"))
+    if not os.path.isabs(path):
+        path = os.path.join(APP_DIR, path)
+    return path
+
+
+def resolve_backup_app_dir(config):
+    path = config.get("app_dir", APP_DIR)
     if not os.path.isabs(path):
         path = os.path.join(APP_DIR, path)
     return path
@@ -197,6 +208,7 @@ class AdminHandler(BaseHTTPRequestHandler):
                 ("/locations", "Locations"),
                 ("/games", "Games"),
                 ("/checkins", "Check-Ins"),
+                ("/backups", "Backups"),
                 ("/logs", "Logs"),
                 ("/logout", "Logout"),
             ]
@@ -277,6 +289,7 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
             "/import-game": self.show_import_game,
             "/checkins": self.show_checkins,
             "/edit-checkin": self.show_edit_checkin,
+            "/backups": self.show_backups,
             "/logs": self.show_logs,
         }
         handler = routes.get(path)
@@ -366,6 +379,21 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
                     self.show_edit_checkin(error, data)
                 else:
                     self.redirect("/checkins?edited=1")
+            elif action == "/create-backup":
+                backup_manager.create_backup("manual", app_dir=resolve_backup_app_dir(self.config))
+                self.redirect("/backups?created=1")
+            elif action == "/restore-backup":
+                error = self.restore_backup(data.get("filename"))
+                if error:
+                    self.show_backups(error)
+                else:
+                    self.redirect("/backups?restored=1")
+            elif action == "/backup-retention":
+                error = self.update_backup_retention(data.get("retention_days"))
+                if error:
+                    self.show_backups(error)
+                else:
+                    self.redirect("/backups?settings=1")
             else:
                 self.send_html("Not Found", "<p>Not found.</p>", 404)
         except sqlite3.Error as exc:
@@ -434,6 +462,7 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
                     "active notes",
                 ),
                 ("/games", "Games", len(self.discover_games(conn)), "installed plugins"),
+                ("/backups", "Backups", len(backup_manager.list_backups()), "saved restore points"),
                 (
                     "/checkins",
                     "Check-Ins",
@@ -947,6 +976,34 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
         )
         self.send_html("Edit Check-In", body)
 
+    def show_backups(self, error=""):
+        retention = backup_manager.retention_days(Database(resolve_db_path(self.config)))
+        backups = backup_manager.list_backups()
+        body = "<div class='card'><h2>Backup / Restore</h2>"
+        if error:
+            body += f"<p class='flash'>{esc(error)}</p>"
+        body += (
+            "<p class='muted'>Daily backups are overwritten once per day and retained by this setting. Manual backups are kept until deleted from the backup folder.</p>"
+            f"{form_button('/create-backup', {}, 'Backup All Now', False)}"
+            "<form method='post' action='/backup-retention'>"
+            "<label>Daily Retention Days</label>"
+            f"<input name='retention_days' type='number' min='1' max='365' value='{retention}'>"
+            "<button>Save Retention</button>"
+            "</form>"
+            "</div>"
+        )
+        body += "<table><tr><th>Backup</th><th>Kind</th><th>When</th><th>Size</th><th></th></tr>"
+        for backup in backups:
+            body += (
+                f"<tr><td>{esc(backup['filename'])}</td><td>{esc(backup['kind'])}</td>"
+                f"<td>{fmt_time(backup['modified_at'])}</td><td>{backup['size']}</td>"
+                f"<td>{form_button('/restore-backup', {'filename': backup['filename']}, 'Restore', False)}</td></tr>"
+            )
+        if not backups:
+            body += "<tr><td colspan='5'>No backups yet.</td></tr>"
+        body += "</table>"
+        self.send_html("Backups", body)
+
     def show_logs(self):
         log_path = os.path.join(APP_DIR, "listener.log")
         try:
@@ -1120,6 +1177,21 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
             )
         if cursor.rowcount == 0:
             return "Check-in not found."
+        return ""
+
+    def update_backup_retention(self, retention_days):
+        try:
+            backup_manager.set_retention_days(retention_days, Database(resolve_db_path(self.config)))
+        except ValueError as exc:
+            return str(exc)
+        backup_manager.prune_daily_backups(backup_manager.retention_days(Database(resolve_db_path(self.config))))
+        return ""
+
+    def restore_backup(self, filename):
+        try:
+            backup_manager.restore_backup(filename, app_dir=resolve_backup_app_dir(self.config))
+        except (OSError, ValueError, zipfile.BadZipFile) as exc:
+            return str(exc)
         return ""
 
     def set_game_enabled(self, module_name, enabled):

@@ -1,5 +1,6 @@
 __pycache__/
 *.py[cod]
+backups/
 listener.log
 telemetry_log.csv
 meshtastic_config.json

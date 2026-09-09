@@ -6,7 +6,8 @@ from http.cookiejar import CookieJar
 from urllib.parse import urlencode
 from urllib.request import HTTPCookieProcessor, Request, build_opener
 
-from admin_server import AdminHandler, check_password, make_password_hash
+from admin_server import AdminHandler, check_password, fmt_time, make_password_hash
+import backup_manager
 from database import Database
 from http.server import ThreadingHTTPServer
 
@@ -50,6 +51,7 @@ class AdminServerTests(unittest.TestCase):
                     ("/board", "Message Board"),
                     ("/locations", "Locations"),
                     ("/games", "Games"),
+                    ("/backups", "Backups"),
                     ("/checkins", "Check-Ins"),
                     ("/logs", "Logs"),
                 ):
@@ -119,6 +121,70 @@ class AdminServerTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=5)
+
+    def test_backup_page_creates_backup_sets_retention_and_restores(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "meshboard.db")
+            app_dir = os.path.join(tmpdir, "app")
+            backup_dir = os.path.join(tmpdir, "backup-store")
+            os.makedirs(app_dir)
+            state_file = os.path.join(app_dir, "admin_config.json")
+            with open(state_file, "w", encoding="utf-8") as handle:
+                handle.write('{"before": true}')
+            Database(db_path)
+            config = {
+                "host": "127.0.0.1",
+                "port": 0,
+                "username": "sysop",
+                "password_hash": make_password_hash("secret"),
+                "session_secret": "test-secret",
+                "database": {"path": db_path},
+                "app_dir": app_dir,
+            }
+            old_backup_dir = os.environ.get("MESHBOARD_BACKUP_DIR")
+            os.environ["MESHBOARD_BACKUP_DIR"] = backup_dir
+            server = ThreadingHTTPServer(("127.0.0.1", 0), AdminHandler)
+            server.config = config
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base = f"http://127.0.0.1:{server.server_address[1]}"
+                opener = build_opener(HTTPCookieProcessor(CookieJar()))
+                login_data = urlencode({"username": "sysop", "password": "secret"}).encode("utf-8")
+                with opener.open(Request(f"{base}/login", data=login_data, method="POST")):
+                    pass
+
+                with opener.open(f"{base}/backups") as response:
+                    backups = response.read().decode("utf-8")
+                self.assertIn("Backup All Now", backups)
+                self.assertIn("Daily Retention Days", backups)
+
+                retention_data = urlencode({"retention_days": "3"}).encode("utf-8")
+                with opener.open(Request(f"{base}/backup-retention", data=retention_data, method="POST")):
+                    pass
+                self.assertEqual("3", Database(db_path).get_app_setting(backup_manager.RETENTION_SETTING))
+
+                with opener.open(Request(f"{base}/create-backup", data=b"", method="POST")):
+                    pass
+                backups = backup_manager.list_backups()
+                self.assertEqual(1, len(backups))
+                self.assertTrue(backups[0]["filename"].startswith("meshboard-manual-"))
+
+                with open(state_file, "w", encoding="utf-8") as handle:
+                    handle.write('{"before": false}')
+                restore_data = urlencode({"filename": backups[0]["filename"]}).encode("utf-8")
+                with opener.open(Request(f"{base}/restore-backup", data=restore_data, method="POST")):
+                    pass
+                with open(state_file, "r", encoding="utf-8") as handle:
+                    self.assertEqual('{"before": true}', handle.read())
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+                if old_backup_dir is None:
+                    os.environ.pop("MESHBOARD_BACKUP_DIR", None)
+                else:
+                    os.environ["MESHBOARD_BACKUP_DIR"] = old_backup_dir
 
     def test_login_and_delete_message(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -221,7 +287,7 @@ class AdminServerTests(unittest.TestCase):
                 self.assertIn("CABN", users)
                 self.assertIn("!cabn", users)
                 self.assertIn("!raw", users)
-                self.assertIn("2026-09-08", users)
+                self.assertIn(fmt_time(1788830000), users)
                 self.assertIn("<td>No</td>", users)
                 self.assertIn("<td>2</td>", users)
 
