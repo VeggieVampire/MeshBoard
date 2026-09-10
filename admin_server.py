@@ -7,6 +7,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import socket
 import sqlite3
 import time
@@ -36,6 +37,10 @@ BOARD_CATEGORIES = [
     ("rumors", "Rumors & Gossip"),
 ]
 GAME_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+FILE_BACKUP_DIR = ".file_backups"
+FILE_EDIT_BACKUP_LIMIT = 7
+TEXT_EDIT_MAX_BYTES = 1024 * 1024
+HIDDEN_FILE_DIRS = {".git", ".venv", "__pycache__", FILE_BACKUP_DIR}
 
 
 def load_config(path=CONFIG_PATH):
@@ -115,6 +120,57 @@ def resolve_backup_app_dir(config):
     if not os.path.isabs(path):
         path = os.path.join(APP_DIR, path)
     return path
+
+
+def resolve_managed_file_path(config, requested_path=""):
+    app_dir = os.path.abspath(resolve_backup_app_dir(config))
+    requested_path = (requested_path or "").strip().replace("\\", os.sep)
+    target = os.path.abspath(os.path.join(app_dir, requested_path))
+    if target != app_dir and not target.startswith(app_dir + os.sep):
+        raise ValueError("Path is outside the MeshBoard app directory.")
+    return app_dir, target
+
+
+def relative_managed_path(config, path):
+    app_dir = os.path.abspath(resolve_backup_app_dir(config))
+    return os.path.relpath(path, app_dir).replace("\\", "/")
+
+
+def file_backup_dir_for(config, relative_path):
+    backup_root = os.path.join(resolve_backup_app_dir(config), FILE_BACKUP_DIR)
+    safe_parts = [part for part in relative_path.replace("\\", "/").split("/") if part not in ("", ".", "..")]
+    return os.path.join(backup_root, *safe_parts)
+
+
+def backup_managed_file(config, path):
+    relative_path = relative_managed_path(config, path)
+    destination_dir = file_backup_dir_for(config, relative_path)
+    os.makedirs(destination_dir, exist_ok=True)
+    backup_path = os.path.join(destination_dir, f"{int(time.time() * 1000)}.bak")
+    shutil.copy2(path, backup_path)
+    backups = sorted(
+        (
+            os.path.join(destination_dir, name)
+            for name in os.listdir(destination_dir)
+            if name.endswith(".bak") and os.path.isfile(os.path.join(destination_dir, name))
+        ),
+        key=lambda item: os.path.getmtime(item),
+        reverse=True,
+    )
+    for old_backup in backups[FILE_EDIT_BACKUP_LIMIT:]:
+        os.remove(old_backup)
+    return backup_path
+
+
+def read_text_file(path):
+    size = os.path.getsize(path)
+    if size > TEXT_EDIT_MAX_BYTES:
+        raise ValueError("File is too large for the web editor.")
+    with open(path, "rb") as handle:
+        data = handle.read()
+    if b"\x00" in data:
+        raise ValueError("Binary files cannot be edited here.")
+    return data.decode("utf-8")
 
 
 def resolve_mesh_config_path(config):
@@ -333,7 +389,7 @@ class AdminHandler(BaseHTTPRequestHandler):
     def read_post(self):
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length).decode("utf-8")
-        return {key: values[-1] for key, values in parse_qs(body).items()}
+        return {key: values[-1] for key, values in parse_qs(body, keep_blank_values=True).items()}
 
     def redirect(self, path):
         self.send_response(303)
@@ -361,6 +417,7 @@ class AdminHandler(BaseHTTPRequestHandler):
                 ("/games", "Games"),
                 ("/checkins", "Check-Ins"),
                 ("/backups", "Backups"),
+                ("/files", "Files"),
                 ("/test-commands", "Test Commands"),
                 ("/config", "Config"),
                 ("/logs", "Logs"),
@@ -445,6 +502,8 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
             "/checkins": self.show_checkins,
             "/edit-checkin": self.show_edit_checkin,
             "/backups": self.show_backups,
+            "/files": self.show_files,
+            "/edit-file": self.show_edit_file,
             "/test-commands": self.show_test_commands,
             "/config": self.show_config,
             "/logs": self.show_logs,
@@ -557,6 +616,12 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
                     self.show_backups(error)
                 else:
                     self.redirect("/backups?settings=1")
+            elif action == "/edit-file":
+                error = self.update_file(data)
+                if error:
+                    self.show_edit_file(error, data)
+                else:
+                    self.redirect("/edit-file?" + urlencode({"path": data.get("path", ""), "saved": "1"}))
             elif action == "/test-commands":
                 self.handle_test_command(data)
             elif action == "/config":
@@ -634,6 +699,7 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
                 ),
                 ("/games", "Games", len(self.discover_games(conn)), "installed plugins"),
                 ("/backups", "Backups", len(backup_manager.list_backups()), "saved restore points"),
+                ("/files", "Files", "", "browse and edit files"),
                 ("/test-commands", "Test Commands", "", "emulate mesh DMs"),
                 (
                     "/checkins",
@@ -1217,6 +1283,95 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
         body += "</table>"
         self.send_html("Backups", body)
 
+    def show_files(self):
+        requested_path = self.query_value("path") or ""
+        try:
+            app_dir, directory = resolve_managed_file_path(self.config, requested_path)
+            if not os.path.isdir(directory):
+                raise ValueError("Directory not found.")
+        except ValueError as exc:
+            self.send_html("Files", f"<p>{esc(exc)}</p><p><a class='button' href='/files'>Back</a></p>", 400)
+            return
+
+        relative_dir = relative_managed_path(self.config, directory)
+        if relative_dir == ".":
+            relative_dir = ""
+        parent_link = ""
+        if directory != app_dir:
+            parent = os.path.dirname(relative_dir)
+            parent_link = f"<p><a class='button' href='/files?{urlencode({'path': parent})}'>Parent</a></p>"
+        rows = ""
+        try:
+            entries = sorted(os.scandir(directory), key=lambda item: (not item.is_dir(), item.name.lower()))
+        except OSError as exc:
+            self.send_html("Files", f"<p>{esc(exc)}</p><p><a class='button' href='/files'>Back</a></p>", 500)
+            return
+        for entry in entries:
+            if entry.name in HIDDEN_FILE_DIRS:
+                continue
+            relative_path = relative_managed_path(self.config, entry.path)
+            if entry.is_dir():
+                open_path = "/files?" + urlencode({"path": relative_path})
+                action = link_button(open_path, "Open")
+                kind = "dir"
+                size = ""
+            else:
+                edit_path = "/edit-file?" + urlencode({"path": relative_path})
+                action = link_button(edit_path, "Edit")
+                kind = "file"
+                size = entry.stat().st_size
+            rows += (
+                f"<tr><td>{esc(entry.name)}</td><td>{kind}</td><td>{esc(size)}</td>"
+                f"<td>{fmt_time(entry.stat().st_mtime)}</td><td>{action}</td></tr>"
+            )
+        if not rows:
+            rows = "<tr><td colspan='5'>No files.</td></tr>"
+        body = (
+            "<div class='card'><h2>Files</h2>"
+            "<p class='muted'>Browse and edit files inside the MeshBoard app directory. File edits create per-file backups first.</p>"
+            f"<p><strong>Path:</strong> /{esc(relative_dir)}</p>"
+            f"{parent_link}</div>"
+            "<table><tr><th>Name</th><th>Type</th><th>Size</th><th>Modified</th><th></th></tr>"
+            f"{rows}</table>"
+        )
+        self.send_html("Files", body)
+
+    def show_edit_file(self, error="", values=None):
+        requested_path = (values or {}).get("path") or self.query_value("path") or ""
+        try:
+            app_dir, path = resolve_managed_file_path(self.config, requested_path)
+            if not os.path.isfile(path):
+                raise ValueError("File not found.")
+            relative_path = relative_managed_path(self.config, path)
+            content = (values or {}).get("content")
+            if content is None:
+                content = read_text_file(path)
+            backup_dir = file_backup_dir_for(self.config, relative_path)
+            backup_count = 0
+            if os.path.isdir(backup_dir):
+                backup_count = len([name for name in os.listdir(backup_dir) if name.endswith(".bak")])
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            self.send_html("Edit File", f"<p>{esc(exc)}</p><p><a class='button' href='/files'>Back</a></p>", 400)
+            return
+        parent = os.path.dirname(relative_path)
+        body = "<div class='card'><h2>Edit File</h2>"
+        if error:
+            body += f"<p class='flash'>{esc(error)}</p>"
+        if self.query_value("saved"):
+            body += "<p class='flash'>File saved and backup created.</p>"
+        body += (
+            f"<p><strong>File:</strong> {esc(relative_path)}</p>"
+            f"<p class='muted'>Backups kept for this file: {backup_count}/{FILE_EDIT_BACKUP_LIMIT}</p>"
+            "<form method='post' action='/edit-file'>"
+            f"<input type='hidden' name='path' value='{esc(relative_path)}'>"
+            "<label>Content</label>"
+            f"<textarea name='content' spellcheck='false' style='min-height: 520px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace;'>{esc(content)}</textarea>"
+            "<button>Save File</button> "
+            f"<a class='button' href='/files?{urlencode({'path': parent})}'>Cancel</a>"
+            "</form></div>"
+        )
+        self.send_html("Edit File", body)
+
     def test_bbs(self):
         config_path = resolve_mesh_config_path(self.config)
         config_mtime = os.path.getmtime(config_path) if os.path.exists(config_path) else 0
@@ -1702,6 +1857,26 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
         try:
             backup_manager.restore_backup(filename, app_dir=resolve_backup_app_dir(self.config))
         except (OSError, ValueError, zipfile.BadZipFile) as exc:
+            return str(exc)
+        return ""
+
+    def update_file(self, data):
+        requested_path = (data.get("path") or "").strip()
+        content = data.get("content")
+        if content is None:
+            return "Missing file content."
+        try:
+            app_dir, path = resolve_managed_file_path(self.config, requested_path)
+            if not os.path.isfile(path):
+                return "File not found."
+            relative_path = relative_managed_path(self.config, path)
+            if relative_path.split("/")[0] in HIDDEN_FILE_DIRS:
+                return "This file cannot be edited from the web editor."
+            read_text_file(path)
+            backup_managed_file(self.config, path)
+            with open(path, "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(content)
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
             return str(exc)
         return ""
 

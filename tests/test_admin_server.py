@@ -1,6 +1,7 @@
 import os
 import tempfile
 import threading
+import time
 import unittest
 from http.cookiejar import CookieJar
 from urllib.parse import urlencode
@@ -399,6 +400,69 @@ class AdminServerTests(unittest.TestCase):
                 with opener.open(Request(f"{base}/test-commands", data=data, method="POST")) as response:
                     page = response.read().decode("utf-8")
                 self.assertIn("Fake node session reset.", page)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+    def test_file_manager_edits_with_rotating_backups(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            app_dir = os.path.join(tmpdir, "app")
+            os.makedirs(app_dir)
+            editable_path = os.path.join(app_dir, "notes.txt")
+            with open(editable_path, "w", encoding="utf-8") as handle:
+                handle.write("before")
+            db_path = os.path.join(app_dir, "meshboard.db")
+            Database(db_path)
+            config = {
+                "host": "127.0.0.1",
+                "port": 0,
+                "username": "sysop",
+                "password_hash": make_password_hash("secret"),
+                "session_secret": "test-secret",
+                "database": {"path": db_path},
+                "app_dir": app_dir,
+            }
+            server = ThreadingHTTPServer(("127.0.0.1", 0), AdminHandler)
+            server.config = config
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base = f"http://127.0.0.1:{server.server_address[1]}"
+                opener = build_opener(HTTPCookieProcessor(CookieJar()))
+                login_data = urlencode({"username": "sysop", "password": "secret"}).encode("utf-8")
+                with opener.open(Request(f"{base}/login", data=login_data, method="POST")):
+                    pass
+
+                with opener.open(f"{base}/files") as response:
+                    page = response.read().decode("utf-8")
+                self.assertIn("notes.txt", page)
+                self.assertIn("Edit", page)
+
+                with opener.open(f"{base}/edit-file?path=notes.txt") as response:
+                    page = response.read().decode("utf-8")
+                self.assertIn("before", page)
+
+                for index in range(9):
+                    data = urlencode({"path": "notes.txt", "content": f"after {index}"}).encode("utf-8")
+                    with opener.open(Request(f"{base}/edit-file", data=data, method="POST")):
+                        pass
+                    time.sleep(0.002)
+
+                with open(editable_path, "r", encoding="utf-8") as handle:
+                    self.assertEqual("after 8", handle.read())
+                backup_dir = os.path.join(app_dir, ".file_backups", "notes.txt")
+                backups = sorted(os.listdir(backup_dir))
+                self.assertEqual(7, len(backups))
+                with open(os.path.join(backup_dir, backups[-1]), "r", encoding="utf-8") as handle:
+                    self.assertIn("after", handle.read())
+
+                try:
+                    opener.open(f"{base}/files?path=..")
+                except Exception as exc:
+                    self.assertIn("HTTP Error 400", str(exc))
+                else:
+                    self.fail("Expected path traversal request to fail.")
             finally:
                 server.shutdown()
                 server.server_close()

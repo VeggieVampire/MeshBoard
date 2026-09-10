@@ -17,6 +17,7 @@ MeshBoard also keeps the attached radio clock sane. On startup it sets the Mesht
 - Events check-in board with a 24-hour HAM-style roster from AddressBook.
 - Location check-ins with optional comments that also appear in nearby location results.
 - Local SysOp admin website for viewing database content, editing records, and enabling/disabling game plugins from the LAN or hotspot.
+- Admin file manager and editor with per-file rotating backups.
 - Admin Test Commands console for emulating direct mesh messages without a second Meshtastic device.
 - Admin backup/restore page with daily rotating backups and manual restore points.
 - Editable Python game plugins with access to MeshBoard location, database, mail, and optional local AI helpers.
@@ -236,7 +237,9 @@ cd ~/MeshBoard
 vi admin_config.json
 ```
 
-Admin pages include Users activity, editable AddressBook contacts, active and archived Mail messages, Message Board posts, location notes, Events check-ins, game controls, backups, test commands, configuration, and recent logs. Edit/archive/delete/remove/close/restore buttons change local MeshBoard files immediately, so use them like a real SysOp console.
+Admin pages include Users activity, editable AddressBook contacts, active and archived Mail messages, Message Board posts, location notes, Events check-ins, game controls, backups, file editing, test commands, configuration, and recent logs. Edit/archive/delete/remove/close/restore buttons change local MeshBoard files immediately, so use them like a real SysOp console.
+
+The `Files` admin page browses the MeshBoard app directory and edits text files in place. Before each save, MeshBoard creates a backup under `.file_backups` and keeps only the newest 7 backups for that specific file.
 
 The `Test Commands` admin page emulates direct messages from a fake node ID. It keeps menu state for that fake node, so you can send `top`, `3`, `1`, and other commands through the web UI without needing a second Meshtastic device.
 
