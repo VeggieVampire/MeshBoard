@@ -52,11 +52,11 @@ class Interface:
     def _is_direct_text_packet(self, packet):
         to_id = packet.get("toId")
         to_num = packet.get("to")
-        if to_id in (None, "^all"):
+        if to_id == "^all":
             return False
-        if to_num in (None, 0xFFFFFFFF):
+        if to_num == 0xFFFFFFFF:
             return False
-        return True
+        return to_id is not None or to_num is not None
 
     def load_device_path(self):
         """Load the device path from the configuration file."""
@@ -197,7 +197,12 @@ class Interface:
                 if self.handle_message:
                     response = self.handle_message(sender, text)
                     if response:
-                        self.send_message(sender, response, reply_id=packet_id)
+                        threading.Thread(
+                            target=self.send_message,
+                            args=(sender, response),
+                            kwargs={"reply_id": packet_id},
+                            daemon=True,
+                        ).start()
 
             # Handle telemetry data
             position = packet.get("position") or decoded.get("position")
@@ -225,8 +230,8 @@ class Interface:
                     logger.info(f"Timestamp: {timestamp}")
             else:
                 logger.debug("Received invalid or incomplete packet.")
-        except Exception as e:
-            logger.error(f"Error processing received message: {e}")
+        except Exception:
+            logger.exception("Error processing received message.")
 
     def send_message(self, user_id, message, reply_id=None):
         """Send a message back to the user."""
@@ -239,8 +244,8 @@ class Interface:
                 delay = self.config["meshtastic"].get("chunk_delay_seconds", 0)
                 if delay:
                     time.sleep(delay)
-        except Exception as e:
-            logger.error(f"Failed to send message to {user_id}: {e}")
+        except Exception:
+            logger.exception("Failed to send message to %s.", user_id)
 
     def _send_chunk_with_ack_retries(self, user_id, chunk):
         timeout = float(self.config["meshtastic"].get("ack_timeout_seconds", 7))

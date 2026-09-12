@@ -755,7 +755,30 @@ class MeshBoardTests(unittest.TestCase):
             "decoded": {"portnum": "TEXT_MESSAGE_APP", "text": "top"},
         }, None)
 
+        for _ in range(20):
+            if sent:
+                break
+            time.sleep(0.01)
         self.assertEqual([("!sender", "ok", 2)], sent)
+
+    def test_numeric_only_direct_text_is_processed(self):
+        mesh_interface = Interface(test_config(self.db_path))
+        sent = []
+        mesh_interface.handle_message = lambda sender, text: "ok"
+        mesh_interface.send_message = lambda sender, text, reply_id=None: sent.append((sender, text, reply_id))
+
+        mesh_interface.on_receive({
+            "fromId": "!sender",
+            "to": 0x9EA0CC08,
+            "id": 3,
+            "decoded": {"portnum": "TEXT_MESSAGE_APP", "text": "top"},
+        }, None)
+
+        for _ in range(20):
+            if sent:
+                break
+            time.sleep(0.01)
+        self.assertEqual([("!sender", "ok", 3)], sent)
 
     def test_outgoing_dm_replies_do_not_use_thread_reply_id(self):
         class FakePacket:
