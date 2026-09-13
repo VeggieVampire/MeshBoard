@@ -9,6 +9,7 @@ LOCK_FILE="/tmp/meshboard-wifi-connect.lock"
 DEFAULT_INTERVAL=60
 NMCLI=(nmcli)
 LAST_NO_WIFI_DIAG=""
+LAST_PERMISSION_DIAG=""
 
 mkdir -p "$(dirname "$LOG_FILE")"
 
@@ -69,6 +70,19 @@ system_model() {
 
 wifi_hardware_state() {
     "${NMCLI[@]}" radio all 2>/dev/null | awk 'NR == 2 {print $1; exit}'
+}
+
+nm_permission_value() {
+    local permission="$1"
+    nmcli general permissions 2>/dev/null | awk -v permission="$permission" '$1 == permission {print $2; exit}'
+}
+
+can_control_wifi() {
+    if [[ "${NMCLI[0]}" == "sudo" ]]; then
+        return 0
+    fi
+
+    [[ "$(nm_permission_value org.freedesktop.NetworkManager.network-control)" == "yes" ]]
 }
 
 wifi_connected() {
@@ -173,6 +187,18 @@ connect_once() {
                 log "This Raspberry Pi model has no onboard WiFi. Remote hotspot access requires a supported USB WiFi adapter or a different Pi with built-in WiFi."
             fi
             LAST_NO_WIFI_DIAG="$diag"
+        fi
+        return
+    fi
+
+    if ! can_control_wifi; then
+        local control_permission scan_permission diag
+        control_permission="$(nm_permission_value org.freedesktop.NetworkManager.network-control)"
+        scan_permission="$(nm_permission_value org.freedesktop.NetworkManager.wifi.scan)"
+        diag="WiFi interface '$interface' exists, but NetworkManager will not allow this background user to control WiFi. network-control=${control_permission:-unknown}, wifi.scan=${scan_permission:-unknown}. Run the installer with sudo or add passwordless nmcli permission for this user."
+        if [[ "$diag" != "$LAST_PERMISSION_DIAG" ]]; then
+            log "$diag"
+            LAST_PERMISSION_DIAG="$diag"
         fi
         return
     fi
