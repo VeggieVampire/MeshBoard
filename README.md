@@ -160,7 +160,7 @@ A Pi without internet usually also has no reliable clock, and a user systemd ser
 crontab -l
 ```
 
-Admin web and Wi-Fi hotspot helpers are separate best-effort startup tasks. If no IP address exists or NetworkManager cannot see Wi-Fi, those helpers may stay down or keep retrying, but they should not stop the Meshtastic BBS from starting. Logs still go to `listener.log`.
+Admin web and Wi-Fi hotspot helpers are separate best-effort startup tasks and are delayed briefly at boot so the BBS can grab the USB radio first. If no IP address exists or NetworkManager cannot see Wi-Fi, those helpers may stay down or keep retrying, but they should not stop the Meshtastic BBS from starting. Logs still go to `listener.log`.
 
 ## Remote Hotspot WiFi Fallback
 
