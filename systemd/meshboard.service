@@ -1,6 +1,5 @@
 [Unit]
 Description=MeshBoard Meshtastic BBS
-After=network-online.target
 
 [Service]
 Type=simple

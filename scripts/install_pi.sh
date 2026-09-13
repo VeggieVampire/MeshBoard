@@ -214,8 +214,8 @@ quote_shell() {
 }
 
 quoted_app_dir="$(quote_shell "$APP_DIR")"
-remove_cron_entry "meshboard-bbs"
 remove_cron_entry "run_meshboard_forever.sh"
+install_cron_entry "meshboard-bbs" "@reboot" "APP_DIR=$quoted_app_dir $quoted_app_dir/scripts/run_meshboard_forever.sh"
 install_cron_entry "meshboard-admin" "@reboot" "APP_DIR=$quoted_app_dir $quoted_app_dir/scripts/run_admin_forever.sh"
 install_cron_entry "meshboard-wifi" "@reboot" "APP_DIR=$quoted_app_dir $quoted_app_dir/scripts/run_wifi_connect_forever.sh"
 install_cron_entry "meshboard-daily-backup" "@daily" "cd $quoted_app_dir && $quoted_app_dir/.venv/bin/python $quoted_app_dir/backup_manager.py --daily"

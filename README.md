@@ -142,7 +142,9 @@ View logs:
 tail -f ~/MeshBoard/listener.log
 ```
 
-The installer tries to enable the user service and also installs cron `@reboot` fallback entries. If you want the user service to start before that user logs in, enable linger:
+The installer enables the MeshBoard user service and also installs a cron `@reboot` fallback for the BBS itself. MeshBoard does not wait for `network-online.target`; USB radio service is allowed to start even when the Pi has no LAN, hotspot, DNS, internet, or web admin access. The launcher uses `/tmp/meshboard.lock` so systemd and cron cannot run two BBS copies at the same time.
+
+If you want the user service to start before that user logs in, enable linger:
 
 ```bash
 sudo loginctl enable-linger "$USER"
@@ -152,13 +154,13 @@ The installer adds the current user to `dialout` for USB serial access. On some 
 
 ## Offline Headless Startup
 
-A Pi without internet usually also has no reliable clock, and a user systemd service can stop when the SSH/login session ends unless linger is enabled. The installer sets up the no-sudo cron launcher automatically:
+A Pi without internet usually also has no reliable clock, and a user systemd service can stop when the SSH/login session ends unless linger is enabled. The installer sets up the no-sudo cron BBS launcher automatically:
 
 ```bash
 crontab -l
 ```
 
-The launcher uses `/tmp/meshboard.lock` so a second copy exits instead of fighting for the USB radio. Logs still go to `listener.log`.
+Admin web and Wi-Fi hotspot helpers are separate best-effort startup tasks. If no IP address exists or NetworkManager cannot see Wi-Fi, those helpers may stay down or keep retrying, but they should not stop the Meshtastic BBS from starting. Logs still go to `listener.log`.
 
 ## Remote Hotspot WiFi Fallback
 
@@ -243,7 +245,7 @@ The `Files` admin page browses the MeshBoard app directory and edits text files 
 
 The `Test Commands` admin page emulates direct messages from a fake node ID. It keeps menu state for that fake node, so you can send `top`, `3`, `1`, and other commands through the web UI without needing a second Meshtastic device.
 
-The admin launcher watches for a usable IPv4 address before starting the website. If the Pi has no LAN or hotspot IP, the web server stays down and only the small launcher loop remains. If the IP disappears later, the launcher stops the website until an IP comes back. To change the check interval, set `ADMIN_IP_CHECK_INTERVAL_SECONDS` before running `scripts/run_admin_forever.sh`.
+The admin launcher watches for a usable IPv4 address before starting the website. If the Pi has no LAN or hotspot IP, the web server stays down and only the small launcher loop remains. If the IP disappears later, the launcher stops the website until an IP comes back. This is intentionally separate from the BBS startup path. To change the check interval, set `ADMIN_IP_CHECK_INTERVAL_SECONDS` before running `scripts/run_admin_forever.sh`.
 
 The `Games` admin page discovers Python game plugins in `modules/Games`. Enable/disable changes apply to the live Games menu. Imported game plugins are saved into `modules/Games` and load after MeshBoard restarts.
 
