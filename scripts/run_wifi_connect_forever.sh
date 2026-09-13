@@ -8,6 +8,7 @@ LOCK_FILE="/tmp/meshboard-wifi-connect.lock"
 
 DEFAULT_INTERVAL=60
 NMCLI=(nmcli)
+LAST_NO_WIFI_DIAG=""
 
 mkdir -p "$(dirname "$LOG_FILE")"
 
@@ -56,6 +57,18 @@ configure_nmcli_command() {
     else
         NMCLI=(nmcli)
     fi
+}
+
+system_model() {
+    if [[ -r /proc/device-tree/model ]]; then
+        tr -d '\0' </proc/device-tree/model
+        return
+    fi
+    awk -F: '/^Model|^Hardware|^Revision/ {gsub(/^[ \t]+/, "", $2); print $2; exit}' /proc/cpuinfo 2>/dev/null
+}
+
+wifi_hardware_state() {
+    "${NMCLI[@]}" -t -f WIFI-HW radio all 2>/dev/null | head -n 1
 }
 
 wifi_connected() {
@@ -144,7 +157,17 @@ connect_once() {
     prefer_visible_hotspot="$(read_config_value PREFER_VISIBLE_HOTSPOT true)"
 
     if [[ -z "$interface" ]]; then
-        log "ENABLED is true, but no WiFi interface is visible to NetworkManager."
+        local model wifi_hw diag
+        model="$(system_model)"
+        wifi_hw="$(wifi_hardware_state)"
+        diag="ENABLED is true, but no WiFi interface is visible to NetworkManager. WIFI-HW=${wifi_hw:-unknown}.${model:+ Device: $model.}"
+        if [[ "$diag" != "$LAST_NO_WIFI_DIAG" ]]; then
+            log "$diag"
+            if [[ "$model" == *"Raspberry Pi 2 Model B"* ]]; then
+                log "This Raspberry Pi model has no onboard WiFi. Remote hotspot access requires a supported USB WiFi adapter or a different Pi with built-in WiFi."
+            fi
+            LAST_NO_WIFI_DIAG="$diag"
+        fi
         return
     fi
 

@@ -166,6 +166,8 @@ Admin web and Wi-Fi hotspot helpers are separate best-effort startup tasks and a
 
 For remote trips, you can keep a disabled hotspot config on the Pi and enable it when you need emergency SSH access. MeshBoard includes a NetworkManager helper for Raspberry Pi OS/OSMC systems that have `nmcli`.
 
+Remote hotspot access requires Wi-Fi hardware that Linux can see. A Raspberry Pi 2 Model B does not have onboard Wi-Fi, so it needs a supported USB Wi-Fi adapter before it can join a phone hotspot. Check `nmcli radio all`, `nmcli device status`, or `ip -br link`; if NetworkManager reports `WIFI-HW missing` and no `wlan0`/Wi-Fi device exists, the hotspot config cannot connect yet.
+
 You can edit these settings from the admin website under Config > Remote Hotspot WiFi. Password fields stay blank in the browser when a password is already saved; leaving them blank keeps the existing password.
 
 The installer also creates the editable config for offline changes:
