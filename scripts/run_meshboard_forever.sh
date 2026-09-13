@@ -3,6 +3,7 @@ set -euo pipefail
 
 APP_DIR="${APP_DIR:-$HOME/MeshBoard}"
 LOG_FILE="$APP_DIR/listener.log"
+CONSOLE_LOG_FILE="$APP_DIR/listener-console.log"
 LOCK_FILE="/tmp/meshboard.lock"
 
 cd "$APP_DIR"
@@ -16,7 +17,7 @@ fi
 
 while true; do
     echo "$(date -Is) Starting MeshBoard." >> "$LOG_FILE"
-    "$APP_DIR/.venv/bin/python" "$APP_DIR/bbs_system.py" >> "$LOG_FILE" 2>&1 || true
+    "$APP_DIR/.venv/bin/python" "$APP_DIR/bbs_system.py" >> "$CONSOLE_LOG_FILE" 2>&1 || true
     echo "$(date -Is) MeshBoard exited; restarting in 10 seconds." >> "$LOG_FILE"
     sleep 10
 done
