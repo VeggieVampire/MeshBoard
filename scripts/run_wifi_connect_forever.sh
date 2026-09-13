@@ -68,7 +68,7 @@ system_model() {
 }
 
 wifi_hardware_state() {
-    "${NMCLI[@]}" -t -f WIFI-HW radio all 2>/dev/null | head -n 1
+    "${NMCLI[@]}" radio all 2>/dev/null | awk 'NR == 2 {print $1; exit}'
 }
 
 wifi_connected() {
@@ -90,7 +90,9 @@ ssid_visible() {
 wifi_interface() {
     local configured="$1"
     if [[ -n "$configured" && "$configured" != "auto" ]]; then
-        printf '%s' "$configured"
+        if [[ -d "/sys/class/net/$configured" ]] || "${NMCLI[@]}" -t -f DEVICE device status 2>/dev/null | grep -Fxq "$configured"; then
+            printf '%s' "$configured"
+        fi
         return
     fi
     "${NMCLI[@]}" -t -f DEVICE,TYPE device status 2>/dev/null | awk -F: '$2 == "wifi" {print $1; exit}'
@@ -160,7 +162,11 @@ connect_once() {
         local model wifi_hw diag
         model="$(system_model)"
         wifi_hw="$(wifi_hardware_state)"
-        diag="ENABLED is true, but no WiFi interface is visible to NetworkManager. WIFI-HW=${wifi_hw:-unknown}.${model:+ Device: $model.}"
+        if [[ -n "$configured_interface" && "$configured_interface" != "auto" ]]; then
+            diag="ENABLED is true, but configured WiFi interface '$configured_interface' does not exist. WIFI-HW=${wifi_hw:-unknown}.${model:+ Device: $model.}"
+        else
+            diag="ENABLED is true, but no WiFi interface is visible to NetworkManager. WIFI-HW=${wifi_hw:-unknown}.${model:+ Device: $model.}"
+        fi
         if [[ "$diag" != "$LAST_NO_WIFI_DIAG" ]]; then
             log "$diag"
             if [[ "$model" == *"Raspberry Pi 2 Model B"* ]]; then
