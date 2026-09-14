@@ -1452,6 +1452,7 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
         time_sync = current.get("time_sync", {})
         wifi = current.get("wifi", {})
         bluetooth = current.get("bluetooth", {})
+        owner = current.get("owner", {})
         local_ai = current.get("local_ai", {})
         admin_port = int(self.config.get("port", 8080))
         admin_urls = [f"http://{address}:{admin_port}" for address in local_ipv4_addresses()]
@@ -1512,6 +1513,10 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
             f"<input name='wifi_port' type='number' min='1' max='65535' value='{esc(value('wifi_port', wifi.get('port', 4403)))}'>"
             "<label>Bluetooth Address</label>"
             f"<input name='bluetooth_address' value='{esc(value('bluetooth_address', bluetooth.get('address', '')))}'>"
+            "<label>Radio Long Name</label>"
+            f"<input name='owner_long_name' maxlength='40' value='{esc(value('owner_long_name', owner.get('long_name', '')))}'>"
+            "<label>Radio Short Name</label>"
+            f"<input name='owner_short_name' maxlength='4' value='{esc(value('owner_short_name', owner.get('short_name', '')))}'>"
             "<h2>Remote Hotspot WiFi</h2>"
             f"<label><input type='checkbox' name='wifi_remote_enabled' value='1'{checked(is_checked('wifi_remote_enabled', remote_wifi.get('enabled', False)))}> Enable Remote Hotspot Helper</label>"
             "<label>WiFi Interface</label>"
@@ -1785,6 +1790,13 @@ input[type="checkbox"] {{ width: auto; margin-right: 8px; }}
                 "port": self.config_int(data, "wifi_port", "WiFi port", 1, 65535),
             }
             current["bluetooth"] = {"address": (data.get("bluetooth_address") or "").strip()}
+            owner_short_name = (data.get("owner_short_name") or "").strip()
+            if owner_short_name and len(owner_short_name) > 4:
+                return "Radio short name must be 4 characters or fewer."
+            current["owner"] = {
+                "long_name": (data.get("owner_long_name") or "").strip(),
+                "short_name": owner_short_name,
+            }
             current["gps"] = {
                 "freshness_seconds": self.config_int(data, "gps_freshness_seconds", "GPS freshness", 30, 86400),
                 "whats_here_radius_meters": self.config_int(data, "whats_here_radius_meters", "What's Here radius", 1, 100000),

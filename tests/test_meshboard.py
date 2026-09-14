@@ -907,6 +907,39 @@ class MeshBoardTests(unittest.TestCase):
             interface_module.SerialInterface = original_serial
             interface_module.BLEInterface = original_ble
 
+    def test_connect_applies_owner_config(self):
+        owner_calls = []
+
+        class FakeLocalNode:
+            def setOwner(self, long_name, short_name):
+                owner_calls.append((long_name, short_name))
+
+        class FakeSerial:
+            def __init__(self, devPath):
+                self.devPath = devPath
+                self.localNode = FakeLocalNode()
+
+        original_pub = interface_module.pub
+        original_serial = interface_module.SerialInterface
+        original_tcp = interface_module.TCPInterface
+        original_ble = interface_module.BLEInterface
+        try:
+            interface_module.pub = type("FakePub", (), {"subscribe": staticmethod(lambda *args: None)})
+            interface_module.SerialInterface = FakeSerial
+            interface_module.TCPInterface = None
+            interface_module.BLEInterface = None
+            config = test_config(self.db_path)
+            config["connection_type"] = "serial"
+            config["owner"] = {"long_name": "MeshBoard Cabin", "short_name": "CABN"}
+            mesh_interface = Interface(config)
+            mesh_interface.connect()
+            self.assertEqual([("MeshBoard Cabin", "CABN")], owner_calls)
+        finally:
+            interface_module.pub = original_pub
+            interface_module.SerialInterface = original_serial
+            interface_module.TCPInterface = original_tcp
+            interface_module.BLEInterface = original_ble
+
 
 if __name__ == "__main__":
     unittest.main()

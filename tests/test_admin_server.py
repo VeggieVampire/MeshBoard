@@ -278,6 +278,8 @@ class AdminServerTests(unittest.TestCase):
                 self.assertIn("ACK Retries", page)
                 self.assertIn("Local AI", page)
                 self.assertIn("Remote Hotspot WiFi", page)
+                self.assertIn("Radio Long Name", page)
+                self.assertIn("Radio Short Name", page)
                 self.assertIn("Generated System Settings", page)
                 self.assertIn("Remote WiFi Config", page)
                 self.assertIn("Password saved; leave blank to keep it.", page)
@@ -290,6 +292,8 @@ class AdminServerTests(unittest.TestCase):
                         "wifi_hostname": "192.168.1.50",
                         "wifi_port": "4404",
                         "bluetooth_address": "AA:BB:CC:DD:EE:FF",
+                        "owner_long_name": "MeshBoard Cabin",
+                        "owner_short_name": "CABN",
                         "max_text_length": "120",
                         "chunk_delay_seconds": "0.2",
                         "ack_timeout_seconds": "9",
@@ -330,6 +334,8 @@ class AdminServerTests(unittest.TestCase):
                 self.assertEqual("wifi", updated["connection_type"])
                 self.assertEqual("192.168.1.50", updated["wifi"]["hostname"])
                 self.assertEqual(4404, updated["wifi"]["port"])
+                self.assertEqual("MeshBoard Cabin", updated["owner"]["long_name"])
+                self.assertEqual("CABN", updated["owner"]["short_name"])
                 self.assertEqual(4, updated["meshtastic"]["ack_retries"])
                 self.assertEqual(600, updated["gps"]["freshness_seconds"])
                 self.assertFalse(updated["time_sync"]["sync_from_host"])

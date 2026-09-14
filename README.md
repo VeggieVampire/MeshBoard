@@ -308,6 +308,7 @@ Config sections include:
 
 - `Backups`: daily retention days.
 - `Connection`: USB path, WiFi/TCP host and port, Bluetooth address, and preferred connection type.
+- `Radio Identity`: Meshtastic long name and 4-character short name shown by the attached radio. The hardware-generated `!node` ID is not changed.
 - `Meshtastic Replies`: max text length, chunk delay, ACK timeout, ACK retries, and reconnect delay.
 - `GPS / Location`: GPS freshness and What's Here/Nearby radius settings.
 - `Time Sync`: mesh/host time sync options and timestamp safety limits.

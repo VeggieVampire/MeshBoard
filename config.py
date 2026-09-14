@@ -16,6 +16,10 @@ DEFAULT_CONFIG = {
     "bluetooth": {
         "address": "",
     },
+    "owner": {
+        "long_name": "",
+        "short_name": "",
+    },
     "gps": {
         "freshness_seconds": 300,
         "whats_here_radius_meters": 100,

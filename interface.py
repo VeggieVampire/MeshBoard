@@ -130,6 +130,28 @@ class Interface:
         logger.info(f"Attempting Bluetooth/BLE Meshtastic connection to {address}...")
         return BLEInterface(address=address)
 
+    def apply_owner_config(self):
+        owner_config = self.config.get("owner", {})
+        long_name = (owner_config.get("long_name") or "").strip()
+        short_name = (owner_config.get("short_name") or "").strip()
+        if not long_name and not short_name:
+            return
+        if short_name and len(short_name) > 4:
+            logger.warning("Configured Meshtastic short name '%s' is longer than 4 characters; skipping owner update.", short_name)
+            return
+
+        local_node = getattr(self.interface, "localNode", None)
+        set_owner = getattr(local_node, "setOwner", None)
+        if not callable(set_owner):
+            logger.warning("Meshtastic local node does not support setOwner; cannot apply configured radio name.")
+            return
+
+        try:
+            set_owner(long_name, short_name)
+            logger.info("Applied Meshtastic radio owner name: long=%r short=%r", long_name, short_name)
+        except Exception as exc:
+            logger.warning("Failed to apply Meshtastic radio owner name: %s", exc)
+
     def connect(self):
         """Attempt to connect to the Meshtastic device."""
         self.reload_config()
@@ -153,6 +175,7 @@ class Interface:
                 pub.subscribe(self.on_receive, "meshtastic.receive.text")
                 pub.subscribe(self.on_receive, "meshtastic.receive.position")
                 logger.info(f"Successfully connected to Meshtastic device using {transport}.")
+                self.apply_owner_config()
                 if not self.time_sync.sync_from_host(self.interface):
                     self.time_sync.sync_from_known_nodes(self.interface)
                 return
