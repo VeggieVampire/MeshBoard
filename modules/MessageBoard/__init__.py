@@ -14,7 +14,26 @@ CATEGORIES = [
 
 
 def display_menu():
+    return _render_menu()
+
+
+def enter_menu(user_id, bbs_system):
+    state = _board_state(bbs_system, user_id)
+    _reset_state(state)
+    return _render_menu(bbs_system)
+
+
+def _render_menu(bbs_system=None):
     lines = ["Message Board"]
+    if bbs_system is not None:
+        recent = bbs_system.db.recent_board_posts(3)
+        if recent:
+            lines.append("Recent Posts:")
+            category_labels = dict(CATEGORIES)
+            for post in recent:
+                author = bbs_system.db.display_name_for(post["author_id"])
+                label = category_labels.get(post["category"], post["category"])
+                lines.append(f"- {label}: {author} - {_short_body(post['body'], 24)}")
     for index, (_, label) in enumerate(CATEGORIES, start=1):
         lines.append(f"{index}. {label}")
     lines.append("cd .. - Back")
@@ -87,6 +106,17 @@ def _render_post(post, bbs_system):
     )
 
 
+def _render_posted(state, post, bbs_system):
+    author = bbs_system.db.display_name_for(post["author_id"])
+    return "\n".join(
+        [
+            f"Posted to {state['label']}.",
+            f"1. {author} - {_fmt_date(post['created_at'])} - {_short_body(post['body'])}",
+            "POST to add. Number to read. BACK.",
+        ]
+    )
+
+
 def _render_events(bbs_system):
     event = bbs_system.db.active_checkin_event()
     if not event:
@@ -129,18 +159,19 @@ def process_command(user_id, command, bbs_system):
 
     if command_lower in ("menu", "back"):
         _reset_state(state)
-        return display_menu()
+        return _render_menu(bbs_system)
 
     if state["state"] == "await_post":
         if not command_clean:
             return "Post cannot be empty. Send the post text."
-        bbs_system.db.create_board_post(state["category"], user_id, command_clean)
+        post_id = bbs_system.db.create_board_post(state["category"], user_id, command_clean)
+        post = bbs_system.db.get_board_post(post_id)
         state["page"] = 0
         if state["category"] == "events":
             state["state"] = "event_posts"
-            return "Posted.\n\n" + _render_board_posts(state, bbs_system)
+            return _render_posted(state, post, bbs_system)
         state["state"] = "category"
-        return "Posted.\n\n" + _render_category(state, bbs_system)
+        return _render_posted(state, post, bbs_system)
 
     if state["state"] == "post":
         if command_lower in ("3", "back"):
@@ -216,7 +247,7 @@ def process_command(user_id, command, bbs_system):
         })
         return _render_category(state, bbs_system)
 
-    return display_menu()
+    return _render_menu(bbs_system)
 
 
 def _render_board_posts(state, bbs_system):

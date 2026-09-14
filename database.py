@@ -339,6 +339,18 @@ class Database:
                 (category, limit, offset),
             ).fetchall()
 
+    def recent_board_posts(self, limit=4):
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT * FROM board_posts
+                WHERE deleted = 0
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
     def get_board_post(self, post_id):
         with self.connect() as conn:
             return conn.execute(
